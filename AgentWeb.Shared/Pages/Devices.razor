@@ -39,6 +39,28 @@ else
     <button class="btn btn-outline-danger btn-sm mt-2" @onclick="RevokeAllAsync">Esci da tutti i dispositivi</button>
 }
 
+<h4 class="mt-4">Verifica in due passaggi</h4>
+@if (twoFactor is null) { <p class="text-muted">Caricamento…</p> }
+else if (twoFactor.Enabled)
+{
+    <p>Attiva: all'accesso serve anche il codice dell'app di autenticazione.</p>
+    <form @onsubmit="DisableTwoFactorAsync" class="d-flex gap-2 mb-2" style="max-width: 360px">
+        <input class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="twoFactorCode" @bind:event="oninput" placeholder="Codice attuale" aria-label="Codice per disattivare" />
+        <button class="btn btn-outline-danger" type="submit" disabled="@(twoFactorCode.Length == 0)">Disattiva</button>
+    </form>
+}
+else
+{
+    <p class="text-muted">Aggiungi AgentWeb a un'app di autenticazione (Google Authenticator, 1Password, Authy…) con questa chiave, poi conferma con il codice che mostra.</p>
+    <p><code class="user-select-all">@twoFactor.SharedKey</code></p>
+    <details class="mb-2"><summary class="small">Link otpauth:// (per le app che lo accettano)</summary><code class="user-select-all small">@twoFactor.AuthenticatorUri</code></details>
+    <form @onsubmit="EnableTwoFactorAsync" class="d-flex gap-2 mb-2" style="max-width: 360px">
+        <input class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="twoFactorCode" @bind:event="oninput" placeholder="Codice a 6 cifre" aria-label="Codice di verifica" />
+        <button class="btn btn-primary" type="submit" disabled="@(twoFactorCode.Length == 0)">Attiva</button>
+    </form>
+}
+@if (twoFactorMessage is { } tm) { <div class="@(tm.Ok ? "text-success" : "text-danger") mb-2" role="status">@tm.Text</div> }
+
 <h4 class="mt-4">Cambia password</h4>
 <form @onsubmit="ChangePasswordAsync" class="d-flex flex-column gap-2 mb-2" style="max-width: 360px">
     <input class="form-control" type="password" autocomplete="current-password" @bind="currentPassword" @bind:event="oninput" placeholder="Password attuale" aria-label="Password attuale" />
@@ -83,6 +105,19 @@ else
     string Mcp => new Uri(Account.ServerBase, "mcp").ToString();
 
     string currentPassword = "", newPassword = "", confirmPassword = "";
+
+    TwoFactorDto? twoFactor;
+    string twoFactorCode = "";
+    (bool Ok, string Text)? twoFactorMessage;
+
+    Task EnableTwoFactorAsync() => ChangeTwoFactorAsync(() => Account.EnableTwoFactorAsync(twoFactorCode.Trim()), "Verifica in due passaggi attivata.");
+    Task DisableTwoFactorAsync() => ChangeTwoFactorAsync(() => Account.DisableTwoFactorAsync(twoFactorCode.Trim()), "Verifica in due passaggi disattivata.");
+
+    async Task ChangeTwoFactorAsync(Func<Task> change, string done)
+    {
+        try { await change(); twoFactorMessage = (true, done); twoFactorCode = ""; twoFactor = await Account.GetTwoFactorAsync(); }
+        catch (Exception ex) { twoFactorMessage = (false, ex.GetBaseException().Message); }
+    }
     (bool Ok, string Text)? passwordMessage;
 
     async Task ChangePasswordAsync()
