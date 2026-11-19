@@ -23,11 +23,11 @@ public sealed class Phase11DaemonTests : IAsyncLifetime
         pidFile = Path.Combine(app.Dir, "pid.txt");
         script = Path.Combine(app.Dir, "eco.sh");
         // Runtime finto: legge il prompt da stdin; "DORMI" lo tiene occupato (per la revoca); salva l'ambiente che riceve.
-        await File.WriteAllTextAsync(script, $"""
+        await File.WriteAllTextAsync(script, $$"""
             #!/bin/sh
             input=$(cat)
-            env > '{envDump}'
-            case "$input" in *DORMI*) echo $$ > '{pidFile}'; sleep 60;; esac
+            env > '{{envDump}}'
+            case "$input" in *DORMI*) echo $$ > '{{pidFile}}'; sleep 60;; esac
             echo "eco: ho letto ${#input} caratteri"
             """);
         File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
