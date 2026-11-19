@@ -11,6 +11,8 @@
         <input id="login-email" class="form-control" type="email" autocomplete="username" @bind="email" />
         <label class="form-label mb-0" for="login-password">Password</label>
         <input id="login-password" class="form-control" type="password" autocomplete="current-password" @bind="password" />
+        <label class="form-label mb-0" for="login-code">Codice di verifica <span class="text-muted">(se attivo)</span></label>
+        <input id="login-code" class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="code" />
         <div class="d-flex gap-2 mt-3">
             <button class="btn btn-primary" type="submit" disabled="@busy">Accedi</button>
             @if (canRegister)
@@ -25,13 +27,13 @@
 </div>
 
 @code {
-    string email = "", password = "";
+    string email = "", password = "", code = "";
     string? error;
     bool busy, canRegister;
 
     protected override async Task OnInitializedAsync() => canRegister = await Session.CanRegisterAsync();
 
-    Task LoginAsync() => Run(() => Session.LoginAsync(email, password));
+    Task LoginAsync() => Run(() => Session.LoginAsync(email, password, code.Length > 0 ? code : null));
     Task RegisterAsync() => Run(() => Session.RegisterAsync(email, password));
 
     async Task Run(Func<Task<string?>> action)

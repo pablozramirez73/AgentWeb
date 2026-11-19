@@ -32,9 +32,11 @@ public sealed class RemoteUserSession(HttpClient anonymous, ITokenStore store) :
         UserName = await store.GetAsync("user");
     }
 
-    public async Task<string?> LoginAsync(string email, string password)
+    public async Task<string?> LoginAsync(string email, string password, string? code = null)
     {
-        using var r = await anonymous.PostAsJsonAsync("identity/login", new { email, password });
+        using var r = await anonymous.PostAsJsonAsync("identity/login", new { email, password, twoFactorCode = code });
+        if (r.StatusCode == HttpStatusCode.Unauthorized && (await r.Content.ReadAsStringAsync()).Contains("RequiresTwoFactor"))
+            return string.IsNullOrWhiteSpace(code) ? "Inserisci il codice dell'app di autenticazione." : "Codice di verifica non valido.";
         if (!r.IsSuccessStatusCode) return r.StatusCode == HttpStatusCode.Unauthorized ? "Email o password errate." : $"Server: HTTP {(int)r.StatusCode}";
         await SaveAsync((await r.Content.ReadFromJsonAsync<TokenResponse>())!, email);
         return null;
@@ -148,6 +150,25 @@ public sealed class RemoteAccountClient(HttpClient http) : IAccountClient
     public async Task ChangePasswordAsync(string currentPassword, string newPassword)
     {
         using var r = await http.PostAsJsonAsync("api/account/password", new ChangePasswordRequest(currentPassword, newPassword));
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
+
+    public async Task<TwoFactorDto> GetTwoFactorAsync()
+    {
+        using var r = await http.GetAsync("api/account/2fa");
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+        return (await r.Content.ReadFromJsonAsync<TwoFactorDto>())!;
+    }
+
+    public async Task EnableTwoFactorAsync(string code)
+    {
+        using var r = await http.PostAsJsonAsync("api/account/2fa/enable", new TwoFactorCodeRequest(code));
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
+
+    public async Task DisableTwoFactorAsync(string code)
+    {
+        using var r = await http.PostAsJsonAsync("api/account/2fa/disable", new TwoFactorCodeRequest(code));
         await RemoteAgentSettingsService.EnsureOkAsync(r, default);
     }
 

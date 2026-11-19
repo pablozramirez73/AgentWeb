@@ -87,7 +87,7 @@ public sealed class LocalUserSession(AuthenticationStateProvider auth, Navigatio
     public string? UserName { get; private set; }
 
     public async Task InitializeAsync() => UserName = (await auth.GetAuthenticationStateAsync()).User.Identity?.Name;
-    public Task<string?> LoginAsync(string email, string password) => Task.FromResult<string?>("Usa la pagina /login.");
+    public Task<string?> LoginAsync(string email, string password, string? code = null) => Task.FromResult<string?>("Usa la pagina /login.");
     public Task<string?> RegisterAsync(string email, string password) => Task.FromResult<string?>("Usa la pagina /login.");
     public Task<bool> CanRegisterAsync() => Task.FromResult(false); // sul web lo decide la pagina /login
     public Task LogoutAsync() { nav.NavigateTo("logout", forceLoad: true); return Task.CompletedTask; }
@@ -116,6 +116,15 @@ public sealed class LocalAccountClient(SessionStore sessions, AuthenticationStat
         await sessions.RevokeAllAsync(u, except: sid, logins: true);
     }
     public async Task<ApiTokenDto> CreateTokenAsync(string name) { var (u, _) = await CurrentAsync(); return await sessions.CreateTokenAsync(u, name); }
+
+    // Il prerender della pagina Dispositivi legge solo lo stato; attivare/disattivare passa dall'API (rate limit compreso).
+    public async Task<TwoFactorDto> GetTwoFactorAsync()
+    {
+        var (u, _) = await CurrentAsync();
+        return await TwoFactor.StatusAsync(users, await users.FindByNameAsync(u) ?? throw new UnauthorizedAccessException());
+    }
+    public Task EnableTwoFactorAsync(string code) => throw new InvalidOperationException("Disponibile solo dal browser o dall'app.");
+    public Task DisableTwoFactorAsync(string code) => throw new InvalidOperationException("Disponibile solo dal browser o dall'app.");
 }
 
 // Le impostazioni contengono token e possono avviare comandi (stdio): solo amministratori.

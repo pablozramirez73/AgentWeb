@@ -116,6 +116,7 @@ app.UseAntiforgery();
 // Ogni endpoint dichiara la sua policy (RoutePolicyTests fallisce altrimenti): file statici esplicitamente pubblici.
 app.MapStaticAssets().AllowAnonymous();
 app.MapAccountEndpoints();
+app.MapTwoFactorEndpoints();
 app.MapSessionEndpoints(); // /identity/login e /identity/refresh con sessione; MapIdentityApi non è più mappato (niente self-signup)
 // Riconnessione con stato: in una breve perdita di rete i messaggi restano nel buffer e vengono reinviati,
 // senza nuova connessione né replay del canale (oltre il buffer subentra la riconnessione normale + replay).

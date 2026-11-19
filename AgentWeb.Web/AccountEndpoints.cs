@@ -29,12 +29,14 @@ public static class AccountEndpoints
 
         var account = app.MapGroup("/account").AllowAnonymous().RequireRateLimiting(SessionEndpoints.AuthRateLimit);
 
-        account.MapPost("/login", async ([FromForm] string email, [FromForm] string password,
+        account.MapPost("/login", async ([FromForm] string email, [FromForm] string password, [FromForm] string? code,
             UserManager<AppUser> users, SignInManager<AppUser> signIn, SessionStore sessions, HttpContext http) =>
         {
             var user = await users.FindByNameAsync(email?.Trim() ?? "");
             var r = user is null ? Microsoft.AspNetCore.Identity.SignInResult.Failed : await signIn.CheckPasswordSignInAsync(user, password ?? "", lockoutOnFailure: true);
             if (!r.Succeeded) return Back(r.IsLockedOut ? "Account bloccato per troppi tentativi: riprova più tardi." : "Email o password errate.");
+            if (!await TwoFactor.PassesAsync(users, user!, code))
+                return Back(string.IsNullOrWhiteSpace(code) ? "Inserisci il codice dell'app di autenticazione." : "Codice di verifica non valido.");
             await SignInWebAsync(user!, signIn, sessions, http);
             return Results.LocalRedirect("~/");
         });
@@ -135,6 +137,8 @@ public static class AccountEndpoints
                 <input class="form-control" id="email" name="email" type="email" autocomplete="username" required autofocus />
                 <label class="form-label mb-0" for="password">Password</label>
                 <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required />
+                <label class="form-label mb-0" for="code">Codice di verifica <span class="text-muted">(se attivo)</span></label>
+                <input class="form-control" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" />
                 <div class="d-flex gap-2 mt-3">
                   <button class="btn btn-primary" type="submit">Accedi</button>
                   {{register}}

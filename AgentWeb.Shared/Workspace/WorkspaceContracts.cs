@@ -96,6 +96,11 @@ public sealed record NewApiTokenRequest(string Name);
 
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
+// Verifica in due passaggi (TOTP, app tipo Authenticator). SharedKey/AuthenticatorUri solo finché non è attiva.
+public sealed record TwoFactorDto(bool Enabled, string? SharedKey, string? AuthenticatorUri);
+
+public sealed record TwoFactorCodeRequest(string Code);
+
 // Implementato in-process dal server web e via HTTP da browser (WebAssembly) e app MAUI.
 public interface IAccountClient
 {
@@ -104,6 +109,9 @@ public interface IAccountClient
     Task<int> RevokeAllSessionsAsync();
     Task<ApiTokenDto> CreateTokenAsync(string name);
     Task ChangePasswordAsync(string currentPassword, string newPassword); // chiude le altre sessioni web/app
+    Task<TwoFactorDto> GetTwoFactorAsync();
+    Task EnableTwoFactorAsync(string code);  // il codice prova che l'app è configurata
+    Task DisableTwoFactorAsync(string code);
     Uri ServerBase { get; } // indirizzo del server, per mostrare l'URL dell'endpoint MCP (/mcp)
 }
 
@@ -113,7 +121,7 @@ public interface IUserSession
     bool NeedsLogin { get; }
     string? UserName { get; }
     Task InitializeAsync();
-    Task<string?> LoginAsync(string email, string password);    // null = ok, altrimenti messaggio d'errore
+    Task<string?> LoginAsync(string email, string password, string? code = null); // null = ok, altrimenti messaggio d'errore; code = TOTP
     Task<string?> RegisterAsync(string email, string password);
     Task<bool> CanRegisterAsync(); // vero solo finché il server non ha account (il primo diventa admin)
     Task LogoutAsync();

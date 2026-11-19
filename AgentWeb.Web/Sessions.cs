@@ -196,6 +196,63 @@ public sealed class SessionRevalidatingAuthStateProvider(ILoggerFactory logger, 
     }
 }
 
+// Verifica in due passaggi: dopo la password, se l'utente l'ha attivata, serve il codice TOTP.
+// Codici sbagliati contano come tentativi falliti (lockout di Identity), come le password sbagliate.
+// shortcut: un codice resta valido per tutta la sua finestra (Identity non ricorda i codici già usati).
+public static class TwoFactor
+{
+    public const string Required = "RequiresTwoFactor"; // stesso "detail" di MapIdentityApi
+
+    public static async Task<bool> PassesAsync(UserManager<AppUser> users, AppUser user, string? code)
+    {
+        if (!await users.GetTwoFactorEnabledAsync(user)) return true;
+        return await VerifyAsync(users, user, code);
+    }
+
+    public static async Task<bool> VerifyAsync(UserManager<AppUser> users, AppUser user, string? code)
+    {
+        code = code?.Replace(" ", "").Replace("-", "");
+        if (string.IsNullOrEmpty(code)) return false;
+        if (await users.VerifyTwoFactorTokenAsync(user, users.Options.Tokens.AuthenticatorTokenProvider, code)) return true;
+        await users.AccessFailedAsync(user);
+        return false;
+    }
+
+    public static async Task<TwoFactorDto> StatusAsync(UserManager<AppUser> users, AppUser user)
+    {
+        if (await users.GetTwoFactorEnabledAsync(user)) return new(true, null, null);
+        var key = await users.GetAuthenticatorKeyAsync(user);
+        if (string.IsNullOrEmpty(key)) { await users.ResetAuthenticatorKeyAsync(user); key = await users.GetAuthenticatorKeyAsync(user); }
+        var uri = $"otpauth://totp/AgentWeb:{Uri.EscapeDataString(user.UserName!)}?secret={key}&issuer=AgentWeb&digits=6";
+        return new(false, key, uri);
+    }
+
+    public static void MapTwoFactorEndpoints(this WebApplication app)
+    {
+        var g = app.MapGroup("/api/account/2fa").RequireAuthorization().RequireRateLimiting(SessionEndpoints.AuthRateLimit);
+        g.MapGet("", async (ClaimsPrincipal u, UserManager<AppUser> users) =>
+            await users.FindByNameAsync(u.Identity!.Name!) is { } user ? Results.Ok(await StatusAsync(users, user)) : Results.Unauthorized());
+        g.MapPost("/enable", async (TwoFactorCodeRequest req, ClaimsPrincipal u, UserManager<AppUser> users) =>
+        {
+            if (await users.FindByNameAsync(u.Identity!.Name!) is not { } user) return Results.Unauthorized();
+            if (await users.GetTwoFactorEnabledAsync(user)) return Results.NoContent();
+            if (!await VerifyAsync(users, user, req.Code)) return Results.Text("Codice non valido: controlla l'ora del telefono e riprova.", statusCode: 400);
+            await users.SetTwoFactorEnabledAsync(user, true);
+            return Results.NoContent();
+        });
+        // Disattivare richiede un codice valido: chi ha solo la sessione (es. un token rubato) non toglie la protezione.
+        g.MapPost("/disable", async (TwoFactorCodeRequest req, ClaimsPrincipal u, UserManager<AppUser> users) =>
+        {
+            if (await users.FindByNameAsync(u.Identity!.Name!) is not { } user) return Results.Unauthorized();
+            if (!await users.GetTwoFactorEnabledAsync(user)) return Results.NoContent();
+            if (!await VerifyAsync(users, user, req.Code)) return Results.Text("Codice non valido.", statusCode: 400);
+            await users.SetTwoFactorEnabledAsync(user, false);
+            await users.ResetAuthenticatorKeyAsync(user); // la prossima attivazione usa una chiave nuova
+            return Results.NoContent();
+        });
+    }
+}
+
 public static class SessionEndpoints
 {
     public const string AuthRateLimit = "auth";
@@ -211,6 +268,8 @@ public static class SessionEndpoints
             var user = await users.FindByNameAsync(req.Email?.Trim() ?? "");
             if (user is null || !(await signIn.CheckPasswordSignInAsync(user, req.Password ?? "", lockoutOnFailure: true)).Succeeded)
                 return Results.Unauthorized();
+            if (!await TwoFactor.PassesAsync(users, user, req.TwoFactorCode))
+                return Results.Problem(detail: TwoFactor.Required, statusCode: StatusCodes.Status401Unauthorized);
             var principal = await signIn.CreateUserPrincipalAsync(user);
             ((ClaimsIdentity)principal.Identity!).AddClaim(new(SessionStore.Claim, await sessions.CreateAsync(user.UserName!, "app", http)));
             return Results.SignIn(principal, authenticationScheme: IdentityConstants.BearerScheme); // scrive AccessTokenResponse

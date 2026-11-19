@@ -21,12 +21,14 @@ public static class AccountMaintenance
         if (!r.Succeeded) { Console.Error.WriteLine(string.Join(" ", r.Errors.Select(e => e.Description))); return 1; }
         await users.SetLockoutEndDateAsync(user, null);
         await users.ResetAccessFailedCountAsync(user);
+        var hadTwoFactor = await users.GetTwoFactorEnabledAsync(user); // telefono perso: si riattiva da Dispositivi
+        if (hadTwoFactor) { await users.SetTwoFactorEnabledAsync(user, false); await users.ResetAuthenticatorKeyAsync(user); }
         var closed = await scope.ServiceProvider.GetRequiredService<SessionStore>().RevokeAllAsync(user.UserName!, logins: true);
 
         file ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AgentWeb-credenziali.txt");
         await File.WriteAllTextAsync(file, $"AgentWeb — account {user.UserName}\nPassword: {password}\n(generata {DateTimeOffset.Now:yyyy-MM-dd HH:mm}; cambiala da Dispositivi → Cambia password, poi elimina questo file)\n");
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        Console.WriteLine($"Password di {user.UserName} reimpostata, {closed} sessioni web/app chiuse. La password è in {file} (leggibile solo da te).");
+        Console.WriteLine($"Password di {user.UserName} reimpostata, {closed} sessioni web/app chiuse{(hadTwoFactor ? ", verifica in due passaggi disattivata" : "")}. La password è in {file} (leggibile solo da te).");
         return 0;
     }
 
