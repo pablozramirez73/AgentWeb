@@ -229,7 +229,7 @@ public static class TwoFactor
 
     public static void MapTwoFactorEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/account/2fa").RequireAuthorization().RequireRateLimiting(SessionEndpoints.AuthRateLimit);
+        var g = app.MapGroup("/api/account/2fa").RequireAuthorization();
         g.MapGet("", async (ClaimsPrincipal u, UserManager<AppUser> users) =>
             await users.FindByNameAsync(u.Identity!.Name!) is { } user ? Results.Ok(await StatusAsync(users, user)) : Results.Unauthorized());
         g.MapPost("/enable", async (TwoFactorCodeRequest req, ClaimsPrincipal u, UserManager<AppUser> users) =>
@@ -239,7 +239,7 @@ public static class TwoFactor
             if (!await VerifyAsync(users, user, req.Code)) return Results.Text("Codice non valido: controlla l'ora del telefono e riprova.", statusCode: 400);
             await users.SetTwoFactorEnabledAsync(user, true);
             return Results.NoContent();
-        });
+        }).RequireRateLimiting(SessionEndpoints.AuthRateLimit); // i tentativi sui codici costano come quelli sulle password
         // Disattivare richiede un codice valido: chi ha solo la sessione (es. un token rubato) non toglie la protezione.
         g.MapPost("/disable", async (TwoFactorCodeRequest req, ClaimsPrincipal u, UserManager<AppUser> users) =>
         {
@@ -249,7 +249,7 @@ public static class TwoFactor
             await users.SetTwoFactorEnabledAsync(user, false);
             await users.ResetAuthenticatorKeyAsync(user); // la prossima attivazione usa una chiave nuova
             return Results.NoContent();
-        });
+        }).RequireRateLimiting(SessionEndpoints.AuthRateLimit);
     }
 }
 

@@ -154,3 +154,26 @@ public sealed class Phase3IdempotencyTests
         Assert.Single(messages!, m => m.Text == "una volta sola");
     }
 }
+
+public sealed class Phase13OpsTests
+{
+    [Fact]
+    public async Task OpenApi_IsDeterministic_AndNotPublic()
+    {
+        using var app = new TestApp();
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await app.CreateClient().GetAsync("/openapi/v1.json")).StatusCode);
+        var first = await alice.GetStringAsync("/openapi/v1.json");
+        Assert.Equal(first, await alice.GetStringAsync("/openapi/v1.json"));
+        Assert.Contains("/api/workspace/channels", first);
+        Assert.Contains("/api/daemon/poll", first);
+    }
+
+    [Fact]
+    public async Task Healthz_AnswersWithoutLogin_WhenTheDatabaseIsUp()
+    {
+        using var app = new TestApp();
+        Assert.Equal(HttpStatusCode.OK, (await app.CreateClient().GetAsync("/healthz")).StatusCode);
+    }
+}

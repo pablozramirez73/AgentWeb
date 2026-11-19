@@ -140,7 +140,12 @@ else
         await LoadAsync();
     }
 
-    protected override Task OnInitializedAsync() => Sessions is null ? LoadAsync() : Task.CompletedTask;
+    protected override async Task OnInitializedAsync()
+    {
+        if (Sessions is null) await LoadAsync();
+        try { twoFactor ??= await Account.GetTwoFactorAsync(); }
+        catch (Exception ex) { twoFactorMessage = (false, ex.GetBaseException().Message); }
+    }
 
     async Task LoadAsync()
     {

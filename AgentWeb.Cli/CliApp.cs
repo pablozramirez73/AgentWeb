@@ -13,6 +13,8 @@ public static class CliApp
 
         Accesso
           login [--server URL] --email EMAIL [--password-stdin]   la password non si passa mai come argomento
+                                                                   con la verifica in due passaggi: il codice è la riga dopo la password (o il prompt)
+          2fa status | 2fa setup | 2fa enable <codice> | 2fa disable <codice>
           logout                                                   revoca la sessione sul server
           whoami
           sessions list | sessions revoke <id>
@@ -87,6 +89,11 @@ public static class CliApp
                     l => Lines(l, s => $"{s.Id}  {s.Kind,-4} {s.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}{(s.Current ? "  (questa)" : "")}  {s.Device}")),
                 "token create" => Print(env, a, await api.PostAsync<ApiTokenDto>("api/account/tokens", new NewApiTokenRequest(a.Rest(2, "il nome del token"))),
                     t => $"Token «{t.Name}» (copialo ora, non verrà più mostrato):\n{t.Token}\n\nClaude Code:\n  claude mcp add --transport http agentweb {api.Server}mcp --header \"Authorization: Bearer {t.Token}\""),
+                "2fa status" => Print(env, a, await api.GetAsync<TwoFactorDto>("api/account/2fa"), t => t.Enabled ? "Verifica in due passaggi: attiva." : "Verifica in due passaggi: non attiva (`agentweb 2fa setup`)."),
+                "2fa setup" => Print(env, a, await api.GetAsync<TwoFactorDto>("api/account/2fa"), t => t.Enabled ? "Già attiva."
+                    : $"Aggiungi questa chiave alla tua app di autenticazione:\n  {t.SharedKey}\n  {t.AuthenticatorUri}\nPoi conferma: agentweb 2fa enable <codice>"),
+                "2fa enable" => await Done(env, a, api.PostAsync("api/account/2fa/enable", new TwoFactorCodeRequest(a.At(2, "il codice")))),
+                "2fa disable" => await Done(env, a, api.PostAsync("api/account/2fa/disable", new TwoFactorCodeRequest(a.At(2, "il codice")))),
                 "sessions revoke" => await Done(env, a, api.PostAsync($"api/account/sessions/{Uri.EscapeDataString(a.At(2, "l'id della sessione"))}/revoke", null)),
 
                 "channel list" => Print(env, a, await api.GetAsync<List<ChannelDto>>("api/workspace/channels"),
@@ -188,7 +195,19 @@ public static class CliApp
         else throw new CliException("Nessun terminale per chiedere la password: usa --password-stdin.", ExitCodes.Usage);
 
         using var http = Http(env, server);
-        using var r = await http.PostAsJsonAsync("identity/login", new { email, password });
+        var r = await http.PostAsJsonAsync("identity/login", new { email, password });
+        if (r.StatusCode == System.Net.HttpStatusCode.Unauthorized && (await r.Content.ReadAsStringAsync()).Contains("RequiresTwoFactor"))
+        {
+            r.Dispose();
+            string? code;
+            if (a.Switches.Contains("--password-stdin")) code = env.In.ReadLine();
+            else if (env.ReadSecret is { } read) { env.Err.Write("Codice di verifica: "); code = read(); }
+            else code = null;
+            if (string.IsNullOrWhiteSpace(code)) throw new CliException("Serve il codice dell'app di autenticazione (riga dopo la password con --password-stdin).", ExitCodes.Unauthenticated);
+            r = await http.PostAsJsonAsync("identity/login", new { email, password, twoFactorCode = code.Trim() });
+            if (r.StatusCode == System.Net.HttpStatusCode.Unauthorized) { r.Dispose(); throw new CliException("Codice di verifica non valido.", ExitCodes.Unauthenticated); }
+        }
+        using var _ = r;
         if (r.StatusCode == System.Net.HttpStatusCode.Unauthorized) throw new CliException("Email o password errate.", ExitCodes.Unauthenticated);
         if (!r.IsSuccessStatusCode) throw new CliException($"Login fallito: HTTP {(int)r.StatusCode}.");
         var t = (await r.Content.ReadFromJsonAsync<JsonElement>())!;

@@ -66,6 +66,7 @@ builder.Services.AddRateLimiter(o =>
 });
 
 // Agenti: ogni agente usa il provider LLM scelto nelle Impostazioni (Ollama locale/remoto/Cloud, OpenAI-compatibile, Anthropic).
+builder.Services.AddOpenApi(); // descrizione delle API in /openapi/v1.json (per SDK e client generati)
 builder.Services.AddSingleton<DaemonBroker>();   // lavoro degli agenti "daemon" verso i computer degli utenti
 builder.Services.AddSingleton<AgentSettingsStore>();
 builder.Services.AddSingleton<LlmClients>();
@@ -104,7 +105,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 // Le pagine d'errore HTML solo per il web: l'app deve ricevere 401/404 veri, non un redirect al login.
-app.UseWhen(ctx => !ctx.Request.Path.StartsWithSegments("/api") && !ctx.Request.Path.StartsWithSegments("/identity") && !ctx.Request.Path.StartsWithSegments("/hubs") && !ctx.Request.Path.StartsWithSegments("/mcp") && !ctx.Request.Path.StartsWithSegments("/a2a"),
+app.UseWhen(ctx => !ctx.Request.Path.StartsWithSegments("/api") && !ctx.Request.Path.StartsWithSegments("/openapi") && !ctx.Request.Path.StartsWithSegments("/healthz") && !ctx.Request.Path.StartsWithSegments("/identity") && !ctx.Request.Path.StartsWithSegments("/hubs") && !ctx.Request.Path.StartsWithSegments("/mcp") && !ctx.Request.Path.StartsWithSegments("/a2a"),
     b => b.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 app.UseHttpsRedirection();
 
@@ -125,6 +126,9 @@ app.MapMcp("/mcp").RequireAuthorization("mcp");
 app.MapA2AExposure();
 app.MapAgentApi();
 app.MapDaemonEndpoints();
+app.MapOpenApi().RequireAuthorization(); // l'elenco delle rotte non è pubblico
+// Health check per load balancer e container: 200 se il database risponde, 503 altrimenti. Nessun dato.
+app.MapGet("/healthz", async (AppDb db, CancellationToken ct) => await db.Database.CanConnectAsync(ct) ? Results.Ok("ok") : Results.StatusCode(503)).AllowAnonymous();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
