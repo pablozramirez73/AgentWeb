@@ -1,0 +1,33 @@
+@page "/debate"
+@rendermode InteractiveWebAssembly
+@using Microsoft.AspNetCore.Components.AI
+@using Microsoft.Extensions.AI
+@implements IDisposable
+@inject IChatClient ChatClient
+
+<PageTitle>Dibattito tra agenti</PageTitle>
+
+<div class="page-header">
+    <h3>Dibattito</h3>
+    <p>Dai un tema: gli agenti abilitati intervengono a turno, ognuno con il suo LLM, e si rispondono a vicenda.</p>
+</div>
+
+<AgentBoundary Agent="agent">
+    <MessageList>
+        <BlockRenderer TBlock="RichContentBlock" Context="block">
+            <div class="debate-msg @(block.AuthorName ?? "Utente")">
+                <strong>@(block.AuthorName ?? "Tu")</strong>
+                <div style="white-space: pre-wrap">@block.RawText</div>
+            </div>
+        </BlockRenderer>
+    </MessageList>
+    <MessageInput Placeholder="Dai un tema agli agenti (es. progettate un microservizio resiliente)..." />
+</AgentBoundary>
+
+@code {
+    private UIAgent agent = default!;
+
+    protected override void OnInitialized() => agent = new UIAgent(ChatClient);
+
+    public void Dispose() => agent.Dispose();
+}

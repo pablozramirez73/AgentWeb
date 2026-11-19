@@ -1,0 +1,12 @@
+﻿<ContentPage xmlns:local="clr-namespace:AgentWeb"
+             xmlns:shared="clr-namespace:AgentWeb.Shared;assembly=AgentWeb.Shared"
+             x:Class="AgentWeb.MainPage"
+             BackgroundColor="{DynamicResource PageBackgroundColor}">
+
+    <BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
+        <BlazorWebView.RootComponents>
+            <RootComponent Selector="#app" ComponentType="{x:Type local:Components.AppRoot}" />
+        </BlazorWebView.RootComponents>
+    </BlazorWebView>
+
+</ContentPage>

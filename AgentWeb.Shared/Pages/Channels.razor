@@ -1,0 +1,610 @@
+@page "/"
+@page "/channels/{ChannelId:int}"
+@rendermode InteractiveWebAssembly
+@implements IAsyncDisposable
+@inject IWorkspaceClient Ws
+@inject IJSRuntime JS
+
+<PageTitle>@(current is null ? "Canali" : $"{(current.IsPrivate ? "🔒" : "#")} {current.Name} · AgentWeb")</PageTitle>
+
+<div class="workspace">
+    <aside class="channels" aria-label="Canali">
+        <form class="search" role="search" @onsubmit="SearchAsync">
+            <input class="form-control form-control-sm" type="search" @bind="searchQuery" @bind:event="oninput" placeholder="Cerca nei messaggi" aria-label="Cerca nei messaggi" maxlength="200" />
+        </form>
+        <div class="channels-head">Canali</div>
+        <ul class="channel-links">
+            @foreach (var c in ChannelList ?? [])
+            {
+                <li>
+                    <a href="channels/@c.Id" class="channel-link @(c.Id == ChannelId ? "active" : "")" aria-current="@(c.Id == ChannelId ? "page" : null)">
+                        @if (c.IsPrivate)
+                        {
+                            <svg class="glyph" viewBox="0 0 24 24" aria-label="privato"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 1 1 8 0v3" /></svg>
+                        }
+                        else
+                        {
+                            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16" /></svg>
+                        }
+                        <span>@c.Name</span>
+                        @if (c.Unread > 0 && c.Id != ChannelId)
+                        {
+                            <span class="count @(c.Mentions > 0 ? "count-mention" : "")" title="@(c.Mentions > 0 ? $"{c.Mentions} menzioni" : $"{c.Unread} non letti")">@(c.Mentions > 0 ? "@" + c.Mentions : c.Unread.ToString())</span>
+                        }
+                    </a>
+                </li>
+            }
+        </ul>
+        <form @onsubmit="CreateChannelAsync" class="new-channel">
+            <input class="form-control form-control-sm" @bind="newChannel" @bind:event="oninput" placeholder="Nuovo canale" aria-label="Nome del nuovo canale" maxlength="50" />
+            <label class="private-toggle" title="Visibile solo ai membri">
+                <input type="checkbox" class="form-check-input" @bind="newPrivate" /> Privato
+            </label>
+            <button class="btn btn-outline-secondary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newChannel)">Crea</button>
+        </form>
+    </aside>
+
+    <section class="channel">
+        @if (error is not null)
+        {
+            <div class="alert alert-danger py-2 fade-in" role="alert">@error</div>
+        }
+
+        @if (searchResults is not null)
+        {
+            <header class="channel-head">
+                <div class="channel-title"><h1 class="h3">Ricerca: «@searchedFor»</h1><p class="channel-meta">@searchResults.Count risultati nei canali che vedi</p></div>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => searchResults = null">Chiudi</button>
+            </header>
+            <ul class="search-results">
+                @foreach (var h in searchResults)
+                {
+                    <li class="fade-in" @key="h.Message.Id">
+                        <a href="channels/@h.Message.ChannelId" @onclick="() => searchResults = null">#@h.ChannelName</a>
+                        <span class="text-muted small">@h.Message.Author · @h.Message.At.ToLocalTime().ToString("d MMM, HH:mm")</span>
+                        <div class="msg-text">@h.Message.Text</div>
+                    </li>
+                }
+            </ul>
+        }
+        else if (current is null)
+        {
+            <div class="empty-state fade-in">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.6 10.6 15.4 7.4M8.6 13.4l6.8 3.2" /></svg>
+                <h1 class="h3">Benvenuto</h1>
+                <p>Scegli o crea un canale. Nei canali persone e agenti lavorano insieme: scrivi <code>@@NomeAgente</code> per coinvolgere un agente, o affidagli un task — se serve, si farà aiutare dagli altri.</p>
+            </div>
+        }
+        else
+        {
+            <header class="channel-head">
+                <div class="channel-title">
+                    <h1 class="h3">@(current.IsPrivate ? "🔒" : "#")&nbsp;@current.Name</h1>
+                    <p class="channel-meta">
+                        @(current.IsPrivate ? $"Privato · {members.Count} membri" : "Pubblico")
+                        @if (channelAgents.Agents.Count > 0) { <span> · @channelAgents.Agents.Count @(channelAgents.Agents.Count == 1 ? "agente" : "agenti")</span> }
+                    </p>
+                </div>
+                <div class="nav-tabs" role="tablist">
+                    <button class="nav-link @(tab == "msg" ? "active" : "")" role="tab" aria-selected="@(tab == "msg")" @onclick='() => tab = "msg"'>Messaggi</button>
+                    <button class="nav-link @(tab == "task" ? "active" : "")" role="tab" aria-selected="@(tab == "task")" @onclick='() => tab = "task"'>
+                        Task @if (OpenTasks > 0) { <span class="count">@OpenTasks</span> }
+                    </button>
+                    <button class="nav-link @(tab == "mem" ? "active" : "")" role="tab" aria-selected="@(tab == "mem")" @onclick="OpenMemoryAsync">Memoria</button>
+                </div>
+            </header>
+
+            <div class="agents-bar">
+                @foreach (var a in channelAgents.Agents)
+                {
+                    <span class="chip chip-agent"><span class="avatar avatar-agent" style="--size: 1.25rem">✦</span>@a
+                        @if (channelAgents.CanManage)
+                        {
+                            <button type="button" class="chip-x" title="Togli @a dal canale" aria-label="Togli @a" @onclick="() => RemoveAgentAsync(a)">✕</button>
+                        }
+                    </span>
+                }
+                @if (channelAgents.CanManage && channelAgents.Available.Count > 0)
+                {
+                    <select class="form-select form-select-sm add-agent" value="" @onchange="AddAgentAsync" aria-label="Aggiungi un agente al canale">
+                        <option value="">+ Aggiungi agente</option>
+                        @foreach (var a in channelAgents.Available) { <option value="@a">@a</option> }
+                    </select>
+                }
+                else if (channelAgents.Agents.Count == 0)
+                {
+                    <span class="text-muted small">@(channelAgents.CanManage ? "Nessun agente: non ce ne sono di abilitati nelle impostazioni." : "Nessun agente in questo canale: chi l'ha creato può aggiungerne.")</span>
+                }
+            </div>
+
+            @if (current.IsPrivate)
+            {
+                <form @onsubmit="AddMemberAsync" class="members">
+                    @foreach (var m in members) { <span class="chip"><span class="avatar" style="--size: 1.25rem">@Initials(m)</span>@m</span> }
+                    <input class="form-control form-control-sm" @bind="newMember" @bind:event="oninput" placeholder="Aggiungi per email" aria-label="Utente da aggiungere" />
+                    <button class="btn btn-outline-secondary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newMember)">Aggiungi</button>
+                </form>
+            }
+
+            @if (tab == "msg")
+            {
+                @* column-reverse: la vista resta ancorata all'ultimo messaggio senza JavaScript *@
+                <div class="feed" role="log" aria-live="polite">
+                    <div class="feed-inner">
+                        @{
+                            // Thread: le risposte si mostrano sotto la loro radice; se la radice non è tra i messaggi caricati, restano nel flusso.
+                            var loaded = messages.Select(x => x.Id).ToHashSet();
+                            var replies = messages.Where(x => x.ParentId is { } p && loaded.Contains(p)).ToLookup(x => x.ParentId!.Value);
+                            var flow = messages.Where(x => x.ParentId is not { } p || !loaded.Contains(p)).ToList();
+                        }
+                        @for (var i = 0; i < flow.Count; i++)
+                        {
+                            var m = flow[i];
+                            if (m.Kind == AuthorKind.System && m.ParentId is null)
+                            {
+                                <div class="msg-system fade-in" @key="m.Id"><span>@m.Text</span><time>@m.At.ToLocalTime().ToString("HH:mm")</time></div>
+                                continue;
+                            }
+                            var prev = i > 0 ? flow[i - 1] : null;
+                            var grouped = prev is not null && prev.Kind != AuthorKind.System && prev.Author == m.Author && m.At - prev.At < TimeSpan.FromMinutes(5) && !replies.Contains(prev.Id) && m.ParentId is null;
+                            @Message((m, grouped, false))
+                            @if (replies.Contains(m.Id))
+                            {
+                                <div class="thread" aria-label="Risposte a @m.Author">
+                                    @foreach (var r in replies[m.Id]) { @Message((r, false, true)) }
+                                </div>
+                            }
+                        }
+                        @foreach (var a in typing)
+                        {
+                            <div class="typing fade-in"><span class="avatar avatar-agent" style="--size: 1.5rem">✦</span>@a sta lavorando <span class="typing-dots"><i></i><i></i><i></i></span></div>
+                        }
+                        @foreach (var p in peopleTyping.Keys)
+                        {
+                            <div class="typing fade-in"><span class="avatar" style="--size: 1.5rem">@Initials(p)</span>@p sta scrivendo <span class="typing-dots"><i></i><i></i><i></i></span></div>
+                        }
+                    </div>
+                </div>
+
+                @if (replyTo is { } rt && messages.FirstOrDefault(x => x.Id == rt) is { } root)
+                {
+                    <div class="replying">
+                        <span>In risposta a <strong>@root.Author</strong>: @(root.Text.Length > 80 ? root.Text[..80] + "…" : root.Text)</span>
+                        <button type="button" class="chip-x" aria-label="Annulla la risposta" @onclick="() => replyTo = null">✕</button>
+                    </div>
+                }
+                <form @onsubmit="SendAsync" class="composer">
+                    <textarea class="form-control" rows="1" @ref="composer" @bind="draft" @bind:event="oninput" @bind:after="OnDraftChanged" maxlength="4000" aria-label="Messaggio"
+                              placeholder="Scrivi a #@current.Name — @@Agente per coinvolgere un agente"></textarea>
+                    <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="Invia">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                    </button>
+                </form>
+                <p class="composer-hint">
+                    Invio per inviare · Maiusc+Invio per andare a capo
+                    @if (channelAgents.Agents.Count > 0) { <span> · @string.Join("  ", channelAgents.Agents.Select(a => "@" + a))</span> }
+                </p>
+            }
+            else if (tab == "mem")
+            {
+                <div class="card memory-intro">
+                    <p class="mb-2">Ciò che gli agenti di questo canale ricordano: fatti salvati con <code>remember</code>, riassunti automatici delle conversazioni lunghe e documenti caricati. Prima di rispondere, ogni agente con la memoria attiva richiama i ricordi pertinenti.</p>
+                    <label class="btn btn-outline-secondary btn-sm upload">
+                        Carica un documento
+                        <InputFile OnChange="UploadAsync" accept=".txt,.md,.markdown,.csv,.json,.xml,.html,.log" />
+                    </label>
+                    <span class="text-muted small ms-2">Testo fino a 1 MB (.txt, .md, .csv, .json…)</span>
+                    @if (memoryStatus is { } ms) { <div class="small mt-2 @(ms.Ok ? "text-success" : "text-danger")">@ms.Text</div> }
+                </div>
+                @if (memoryItems is null) { <p class="text-muted mt-3">Caricamento…</p> }
+                else if (memoryItems.Count == 0) { <p class="text-muted mt-3">La memoria del canale è vuota.</p> }
+                else
+                {
+                    <ul class="memories">
+                        @foreach (var m in memoryItems)
+                        {
+                            <li class="memory fade-in" @key="@(m.SourceId ?? m.Id.ToString())">
+                                <span class="mem-kind mem-@m.Kind">@(m.Kind switch { "document" => "Documento", "summary" => "Riassunto", _ => "Ricordo" })</span>
+                                <div class="memory-body">
+                                    @if (m.Kind == "document") { <div class="memory-title">@m.Title <span class="text-muted small">· @m.Chunks parti</span></div> }
+                                    <div class="memory-text">@m.Content</div>
+                                    <div class="memory-meta">@m.CreatedBy · @m.CreatedAt.ToLocalTime().ToString("d MMM, HH:mm")</div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteMemoryAsync(m)" aria-label="Cancella">Cancella</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+            else
+            {
+                <form @onsubmit="CreateTaskAsync" class="card new-task">
+                    <input class="form-control" @bind="newTitle" @bind:event="oninput" placeholder="Cosa c'è da fare?" aria-label="Titolo del task" maxlength="200" />
+                    <textarea class="form-control" rows="2" @bind="newDescription" placeholder="Dettagli (facoltativi)" aria-label="Descrizione" maxlength="4000"></textarea>
+                    <div class="new-task-row">
+                        <select class="form-select" @bind="newAssignee" aria-label="Assegna a">
+                            <option value="">Non assegnato</option>
+                            @foreach (var a in channelAgents.Agents) { <option value="@a">@a · agente</option> }
+                            <option value="@NewTaskRequest.Me">A me</option>
+                        </select>
+                        <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(newTitle)">Crea task</button>
+                    </div>
+                </form>
+
+                @if (tasks.Count == 0)
+                {
+                    <p class="text-muted mt-3">Nessun task in questo canale.</p>
+                }
+                <ul class="tasks">
+                    @foreach (var t in tasks.OrderBy(t => t.Status == WorkStatus.Done).ThenByDescending(t => t.Id))
+                    {
+                        <li class="task fade-in" @key="t.Id">
+                            <span class="status status-@t.Status.ToString().ToLowerInvariant()">@Label(t.Status)</span>
+                            <div class="task-body">
+                                <div class="task-title">@t.Title <span class="task-id">#@t.Id</span></div>
+                                <div class="task-meta">
+                                    @(t.Assignee is null ? "Non assegnato" : (t.AssigneeIsAgent ? "✦ " : "") + t.Assignee) · creato da @t.CreatedBy
+                                </div>
+                                @if (!string.IsNullOrEmpty(t.Description)) { <div class="task-desc">@t.Description</div> }
+                                @if (!string.IsNullOrEmpty(t.Result))
+                                {
+                                    <details class="task-result"><summary>Risultato</summary><div class="msg-text">@t.Result</div></details>
+                                }
+                            </div>
+                            <div class="task-actions">
+                                @if (t.Status is WorkStatus.Todo or WorkStatus.InProgress && !t.AssigneeIsAgent)
+                                {
+                                    <button class="btn btn-outline-success btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Done)">Fatto</button>
+                                }
+                                @if (t.Status is WorkStatus.Done or WorkStatus.Failed)
+                                {
+                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Todo)">Riapri</button>
+                                }
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter] public int? ChannelId { get; set; }
+
+    // Stato persistito dal prerender (.NET 10+): il browser riceve i dati già caricati sul server dentro la pagina
+    // e non li richiede di nuovo. Dopo l'iscrizione al canale basta una richiesta "dal messaggio N in poi".
+    public sealed record ChannelSnapshot(int ChannelId, List<MessageDto> Messages, List<TaskDto> Tasks, List<string> Members, ChannelAgentsDto Agents);
+
+    [PersistentState] public List<ChannelDto>? ChannelList { get; set; }
+    [PersistentState] public ChannelSnapshot? Snapshot { get; set; }
+    [PersistentState] public string? Me { get; set; }
+
+    static readonly ChannelAgentsDto NoAgents = new([], [], false);
+    ChannelAgentsDto channelAgents = NoAgents;
+    readonly Dictionary<string, DateTimeOffset> peopleTyping = []; // persona -> quando scompare l'indicatore se non arriva lo stop
+    DateTimeOffset lastTypingSent;
+    System.Threading.Timer? typingSweep;
+
+    List<MessageDto> messages = [];
+    List<TaskDto> tasks = [];
+    List<string> members = [];
+    readonly HashSet<string> typing = [];
+    ChannelDto? current;
+    string tab = "msg", newChannel = "", draft = "", newTitle = "", newDescription = "", newAssignee = "", newMember = "";
+    bool newPrivate;
+    string? error;
+    int? loadedChannel;
+    ElementReference composer;
+    IJSObjectReference? module;
+
+    int OpenTasks => tasks.Count(t => t.Status is WorkStatus.Todo or WorkStatus.InProgress);
+
+    long? replyTo;            // radice del thread a cui risponde il composer
+    long lastMarked;          // ultimo id segnato come letto sul server (evita una richiesta per ogni evento)
+    string searchQuery = "", searchedFor = "";
+    List<SearchHitDto>? searchResults;
+
+    RenderFragment Message((MessageDto M, bool Grouped, bool Reply) x) => @<text>
+        @if (x.M.Kind == AuthorKind.System)
+        {
+            <div class="msg-system fade-in" @key="x.M.Id"><span>@x.M.Text</span><time>@x.M.At.ToLocalTime().ToString("HH:mm")</time></div>
+        }
+        else
+        {
+            <article class="msg fade-in @(x.Grouped ? "grouped" : "") @(x.Reply ? "reply" : "")" @key="x.M.Id">
+                @if (x.Grouped)
+                {
+                    <span class="msg-gutter"><time>@x.M.At.ToLocalTime().ToString("HH:mm")</time></span>
+                }
+                else
+                {
+                    <span class="avatar @(x.M.Kind == AuthorKind.Agent ? "avatar-agent" : "")" aria-hidden="true">@(x.M.Kind == AuthorKind.Agent ? "✦" : Initials(x.M.Author))</span>
+                }
+                <div class="msg-body">
+                    @if (!x.Grouped)
+                    {
+                        <div class="msg-head">
+                            <strong>@x.M.Author</strong>
+                            @if (x.M.Kind == AuthorKind.Agent) { <span class="tag">agente</span> }
+                            @if (x.M.ParentId is not null && !x.Reply) { <span class="tag">nel thread</span> }
+                            <time>@x.M.At.ToLocalTime().ToString("HH:mm")</time>
+                        </div>
+                    }
+                    <div class="msg-text">@x.M.Text</div>
+                </div>
+                <button type="button" class="msg-reply" @onclick="() => StartReply(x.M)" aria-label="Rispondi nel thread">Rispondi</button>
+            </article>
+        }
+    </text>;
+
+    void StartReply(MessageDto m)
+    {
+        replyTo = m.ParentId ?? m.Id;
+        _ = composer.FocusAsync();
+    }
+
+    // Letto fino all'ultimo messaggio visibile: il badge del canale si azzera qui e sul server (il cursore avanza soltanto).
+    async Task MarkReadAsync()
+    {
+        if (current is null || messages.LastOrDefault()?.Id is not { } last || last <= lastMarked) return;
+        lastMarked = last;
+        if (ChannelList?.FindIndex(c => c.Id == current.Id) is int i and >= 0) ChannelList[i] = ChannelList[i] with { Unread = 0, Mentions = 0 };
+        try { await Ws.MarkReadAsync(current.Id, last); } catch (Exception) { lastMarked = 0; } // si riprova al prossimo messaggio
+    }
+
+    Task SearchAsync() => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(searchQuery)) { searchResults = null; return; }
+        searchedFor = searchQuery.Trim();
+        searchResults = await Ws.SearchAsync(searchedFor);
+    });
+
+    protected override async Task OnInitializedAsync()
+    {
+        Ws.Changed += OnEvent;
+        await Run(async () =>
+        {
+            await Ws.StartAsync();
+            ChannelList ??= await Ws.GetChannelsAsync();
+            Me ??= await Ws.WhoAmIAsync();
+        });
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedChannel == ChannelId) return;
+        loadedChannel = ChannelId;
+        current = ChannelList?.FirstOrDefault(c => c.Id == ChannelId);
+        typing.Clear(); peopleTyping.Clear(); tab = "msg"; memoryItems = null; replyTo = null; lastMarked = 0; searchResults = null;
+        await Run(async () =>
+        {
+            if (current is null) { await Ws.WatchChannelAsync(null); messages = []; tasks = []; members = []; channelAgents = NoAgents; Snapshot = null; return; }
+
+            if (Snapshot is { } s && s.ChannelId == current.Id)
+            {
+                (messages, tasks, members, channelAgents) = (s.Messages, s.Tasks, s.Members, s.Agents);
+                // Iscrizione + ciò che è arrivato tra il prerender e l'avvio nel browser: una sola chiamata sull'hub.
+                Merge(await Ws.WatchChannelAsync(current.Id, messages.LastOrDefault()?.Id ?? 0), current.Id);
+            }
+            else
+            {
+                // Solo il canale osservato manda eventi: lo si osserva prima di leggere, così nessun messaggio cade nel mezzo.
+                await Ws.WatchChannelAsync(current.Id);
+                messages = await Ws.GetMessagesAsync(current.Id);
+                tasks = await Ws.GetTasksAsync(current.Id);
+                members = current.IsPrivate ? await Ws.GetMembersAsync(current.Id) : [];
+                channelAgents = await Ws.GetChannelAgentsAsync(current.Id);
+            }
+            Snapshot = new(current.Id, messages, tasks, members, channelAgents);
+            await MarkReadAsync();
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (current is null || tab != "msg") return; // (durante il prerender OnAfterRender non viene eseguito)
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AgentWeb.Shared/Pages/Channels.razor.js");
+            await module.InvokeVoidAsync("enterToSend", composer);
+        }
+        catch (JSException) { } // senza JS resta il pulsante Invia
+    }
+
+    // Ordine monotono per canale: si inserisce per Id, i duplicati (evento + replay) si scartano.
+    void AddMessage(MessageDto m)
+    {
+        if (messages.Any(x => x.Id == m.Id)) return;
+        var i = messages.FindIndex(x => x.Id > m.Id);
+        if (i < 0) messages.Add(m); else messages.Insert(i, m);
+    }
+
+    async Task CatchUpAsync(int channelId) => Merge(await Ws.GetMessagesSinceAsync(channelId, messages.LastOrDefault()?.Id ?? 0), channelId);
+
+    void Merge(ReplayDto? replay, int channelId)
+    {
+        if (replay is null) return;
+        if (replay.Reset) _ = Run(async () => { messages = await Ws.GetMessagesAsync(channelId); StateHasChanged(); });
+        else foreach (var m in replay.Messages) AddMessage(m);
+    }
+
+    // Dopo una riconnessione lunga (oltre il buffer della riconnessione con stato): replay e task aggiornati.
+    async Task ResyncAsync(int channelId) => await Run(async () =>
+    {
+        await CatchUpAsync(channelId);
+        tasks = await Ws.GetTasksAsync(channelId);
+        StateHasChanged();
+    });
+
+    void OnEvent(WorkspaceEvent e) => InvokeAsync(async () =>
+    {
+        switch (e.Kind)
+        {
+            case "channel" when e.Channel is { } c:
+                ChannelList ??= [];
+                if (ChannelList.All(x => x.Id != c.Id)) ChannelList.Add(c);
+                if (c.Id == ChannelId && current?.IsPrivate == true) members = await Ws.GetMembersAsync(c.Id);
+                break;
+            case "message" when e.ChannelId == ChannelId && e.Message is { } m:
+                AddMessage(m);
+                if (m.Kind == AuthorKind.Agent) typing.Remove(m.Author); else peopleTyping.Remove(m.Author);
+                await MarkReadAsync();
+                break;
+            case "activity" when e.ChannelId != ChannelId && e.Message is { } m && m.Kind != AuthorKind.System && m.Author != Me:
+                if (ChannelList?.FindIndex(c => c.Id == e.ChannelId) is int i and >= 0)
+                {
+                    var mention = Me is not null && m.Text.Contains("@" + Me.Split('@')[0], StringComparison.OrdinalIgnoreCase);
+                    ChannelList[i] = ChannelList[i] with { Unread = ChannelList[i].Unread + 1, Mentions = ChannelList[i].Mentions + (mention ? 1 : 0) };
+                }
+                break;
+            case "resync" when e.ChannelId == ChannelId:
+                await ResyncAsync(e.ChannelId);
+                return;
+            case "task" when e.ChannelId == ChannelId && e.Task is { } t:
+                tasks.RemoveAll(x => x.Id == t.Id);
+                tasks.Add(t);
+                break;
+            case "typing" when e.ChannelId == ChannelId && e.Agent is { } a && e.Human:
+                if (e.Typing) { peopleTyping[a] = DateTimeOffset.UtcNow.AddSeconds(6); StartTypingSweep(); } else peopleTyping.Remove(a);
+                break;
+            case "typing" when e.ChannelId == ChannelId && e.Agent is { } a:
+                if (e.Typing) typing.Add(a); else typing.Remove(a);
+                break;
+            case "agents" when e.ChannelId == ChannelId:
+                channelAgents = await Ws.GetChannelAgentsAsync(e.ChannelId);
+                break;
+            default:
+                return;
+        }
+        StateHasChanged();
+    });
+
+    Task CreateChannelAsync() => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(newChannel)) return;
+        var c = await Ws.CreateChannelAsync(newChannel, newPrivate);
+        ChannelList ??= [];
+        if (ChannelList.All(x => x.Id != c.Id)) ChannelList.Add(c);
+        newChannel = "";
+        newPrivate = false;
+    });
+
+    Task AddMemberAsync() => Run(async () =>
+    {
+        if (current is null || string.IsNullOrWhiteSpace(newMember)) return;
+        await Ws.AddMemberAsync(current.Id, newMember.Trim());
+        members = await Ws.GetMembersAsync(current.Id);
+        newMember = "";
+    });
+
+    Task SendAsync() => Run(async () =>
+    {
+        if (current is null || string.IsNullOrWhiteSpace(draft)) return;
+        var text = draft.Trim();
+        draft = "";
+        lastTypingSent = default;
+        var parent = replyTo;
+        replyTo = null;
+        await Ws.SendMessageAsync(current.Id, text, parent); // sull'hub; il messaggio arriva poi come evento, a tutti i client
+        _ = Ws.SetTypingAsync(current.Id, false);
+    });
+
+    Task CreateTaskAsync() => Run(async () =>
+    {
+        if (current is null || string.IsNullOrWhiteSpace(newTitle)) return;
+        await Ws.CreateTaskAsync(current.Id, new(newTitle, newDescription, newAssignee == "" ? null : newAssignee));
+        newTitle = newDescription = newAssignee = "";
+    });
+
+    Task SetStatusAsync(TaskDto t, WorkStatus s) => Run(() => Ws.SetTaskStatusAsync(t.Id, s));
+
+    // "Sta scrivendo": al massimo un avviso ogni 3 s mentre si scrive (un frame minuscolo sull'hub, mai una richiesta HTTP).
+    void OnDraftChanged()
+    {
+        if (current is null || string.IsNullOrWhiteSpace(draft)) return;
+        if (DateTimeOffset.UtcNow - lastTypingSent < TimeSpan.FromSeconds(3)) return;
+        lastTypingSent = DateTimeOffset.UtcNow;
+        _ = Ws.SetTypingAsync(current.Id, true);
+    }
+
+    // Se lo "stop" non arriva (scheda chiusa, rete persa), l'indicatore sparisce da solo.
+    void StartTypingSweep() => typingSweep ??= new System.Threading.Timer(_ => InvokeAsync(() =>
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expired = peopleTyping.Where(p => p.Value < now).Select(p => p.Key).ToList();
+        if (expired.Count == 0) return;
+        foreach (var p in expired) peopleTyping.Remove(p);
+        StateHasChanged();
+    }), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+
+    // ---------- Memoria (caricata solo quando si apre la scheda) ----------
+    List<MemoryDto>? memoryItems;
+    (bool Ok, string Text)? memoryStatus;
+
+    async Task OpenMemoryAsync()
+    {
+        tab = "mem";
+        memoryStatus = null;
+        if (current is not null) await Run(async () => memoryItems = await Ws.GetChannelMemoryAsync(current.Id));
+    }
+
+    async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        if (current is null) return;
+        memoryStatus = (true, $"Carico «{e.File.Name}» e calcolo gli embedding…");
+        try
+        {
+            if (e.File.Size > 1_000_000) throw new InvalidOperationException("File troppo grande: massimo 1 MB.");
+            using var reader = new StreamReader(e.File.OpenReadStream(1_000_000));
+            await Ws.UploadDocumentAsync(current.Id, e.File.Name, await reader.ReadToEndAsync());
+            memoryStatus = (true, $"«{e.File.Name}» aggiunto alla memoria del canale.");
+            memoryItems = await Ws.GetChannelMemoryAsync(current.Id);
+        }
+        catch (Exception ex) { memoryStatus = (false, ex.GetBaseException().Message); }
+    }
+
+    Task DeleteMemoryAsync(MemoryDto m) => Run(async () =>
+    {
+        if (current is null) return;
+        if (m.SourceId is { } source) await Ws.DeleteDocumentAsync(current.Id, source); else await Ws.DeleteMemoryAsync(current.Id, m.Id);
+        memoryItems = await Ws.GetChannelMemoryAsync(current.Id);
+    });
+
+    Task AddAgentAsync(ChangeEventArgs e) => Run(async () =>
+    {
+        if (current is null || e.Value is not string { Length: > 0 } agent) return;
+        await Ws.AddChannelAgentAsync(current.Id, agent);
+        channelAgents = await Ws.GetChannelAgentsAsync(current.Id);
+    });
+
+    Task RemoveAgentAsync(string agent) => Run(async () =>
+    {
+        if (current is null) return;
+        await Ws.RemoveChannelAgentAsync(current.Id, agent);
+        channelAgents = await Ws.GetChannelAgentsAsync(current.Id);
+    });
+
+    async Task Run(Func<Task> action)
+    {
+        error = null;
+        try { await action(); }
+        catch (Exception ex) { error = ex.GetBaseException().Message; }
+    }
+
+    static string Initials(string user)
+    {
+        var name = user.Split('@')[0];
+        var parts = name.Split(['.', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}" : name[..Math.Min(2, name.Length)];
+    }
+
+    static string Label(WorkStatus s) => s switch { WorkStatus.Todo => "Da fare", WorkStatus.InProgress => "In corso", WorkStatus.Done => "Fatto", _ => "Fallito" };
+
+    public async ValueTask DisposeAsync()
+    {
+        Ws.Changed -= OnEvent;
+        typingSweep?.Dispose();
+        if (module is not null) try { await module.DisposeAsync(); } catch (JSDisconnectedException) { }
+    }
+}

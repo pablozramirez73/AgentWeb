@@ -1,0 +1,8 @@
+@if (Result is { } r)
+{
+    <span class="small @(r.Ok ? "text-success" : "text-danger")" role="status">@r.Text</span>
+}
+
+@code {
+    [Parameter] public (bool Ok, string Text)? Result { get; set; }
+}

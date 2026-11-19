@@ -1,0 +1,8 @@
+.tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .5rem; }
+.tool { display: flex; gap: .6rem; align-items: flex-start; padding: .6rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; transition: border-color .15s var(--ease), background-color .15s var(--ease); }
+.tool:hover { border-color: var(--border-strong); }
+.tool:has(input:checked) { border-color: var(--ink); background: var(--surface-2); }
+.tool input { margin-top: .2rem; flex: 0 0 auto; }
+.tool span { display: flex; flex-direction: column; min-width: 0; }
+.tool strong { font-size: .84rem; font-weight: 600; }
+.tool small { color: var(--muted); font-size: .74rem; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; }

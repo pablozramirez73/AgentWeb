@@ -1,0 +1,44 @@
+@inject IUserSession Session
+
+@* Usato dall'app MAUI: sul web il login è la pagina /login del server (cookie). *@
+<div class="login">
+    <div class="login-card fade-in">
+    <svg class="login-mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.6 10.6 15.4 7.4M8.6 13.4l6.8 3.2" /></svg>
+    <h1 class="h4 mb-1">Accedi ad AgentWeb</h1>
+    <p class="text-muted small mb-4">Persone e agenti, nello stesso spazio.</p>
+    <form @onsubmit="LoginAsync" class="d-flex flex-column gap-2">
+        <label class="form-label mb-0" for="login-email">Email</label>
+        <input id="login-email" class="form-control" type="email" autocomplete="username" @bind="email" />
+        <label class="form-label mb-0" for="login-password">Password</label>
+        <input id="login-password" class="form-control" type="password" autocomplete="current-password" @bind="password" />
+        <div class="d-flex gap-2 mt-3">
+            <button class="btn btn-primary" type="submit" disabled="@busy">Accedi</button>
+            @if (canRegister)
+            {
+                <button class="btn btn-outline-secondary" type="button" disabled="@busy" @onclick="RegisterAsync">Crea il primo account</button>
+            }
+        </div>
+        @if (error is not null) { <div class="text-danger" role="alert">@error</div> }
+        <p class="text-muted small mt-2 mb-0">@(canRegister ? "Il server non ha ancora account: il primo che crei è amministratore." : "Non hai un account? Chiedilo a un amministratore.")</p>
+    </form>
+    </div>
+</div>
+
+@code {
+    string email = "", password = "";
+    string? error;
+    bool busy, canRegister;
+
+    protected override async Task OnInitializedAsync() => canRegister = await Session.CanRegisterAsync();
+
+    Task LoginAsync() => Run(() => Session.LoginAsync(email, password));
+    Task RegisterAsync() => Run(() => Session.RegisterAsync(email, password));
+
+    async Task Run(Func<Task<string?>> action)
+    {
+        busy = true; error = null;
+        try { error = await action(); }
+        catch (Exception ex) { error = ex.GetBaseException().Message; }
+        finally { busy = false; }
+    }
+}

@@ -1,0 +1,31 @@
+@implements IDisposable
+@inject IUserSession Session
+
+@* Radice dell'app: finché non c'è una sessione mostra il login, poi le pagine condivise. *@
+@if (!ready)
+{
+    <div style="min-height:100dvh;display:grid;place-items:center"><span class="typing"><span class="typing-dots"><i></i><i></i><i></i></span></span></div>
+}
+else if (Session.NeedsLogin)
+{
+    <LoginForm />
+}
+else
+{
+    <Routes />
+}
+
+@code {
+    bool ready;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.Changed += Refresh;
+        await Session.InitializeAsync();
+        ready = true;
+    }
+
+    void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Session.Changed -= Refresh;
+}

@@ -1,0 +1,9 @@
+.sessions { list-style: none; padding: 0; margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; }
+.session { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .9rem; padding: .85rem 1rem; }
+.session + .session { border-top: 1px solid var(--border); }
+.session-icon { width: 2.25rem; height: 2.25rem; display: grid; place-items: center; border-radius: 10px; background: var(--surface-2); color: var(--text-2); }
+.session-icon svg { width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.session-title { font-weight: 600; font-size: .92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-meta { color: var(--muted); font-size: .8rem; }
+form { max-width: 420px; }
+pre { white-space: pre-wrap; word-break: break-all; }

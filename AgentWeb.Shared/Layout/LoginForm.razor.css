@@ -1,0 +1,5 @@
+.login { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem; background: var(--bg); }
+.login-card { width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 2rem 1.75rem; box-shadow: var(--shadow); }
+.login-mark { width: 2rem; height: 2rem; margin-bottom: 1.25rem; fill: none; stroke: var(--text); stroke-width: 1.6; stroke-linecap: round; }
+.login-mark circle { fill: var(--text); stroke: none; }
+.login-card .btn-primary { flex: 1; }

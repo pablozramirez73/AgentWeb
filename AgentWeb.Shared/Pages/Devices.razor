@@ -1,0 +1,144 @@
+@page "/devices"
+@rendermode InteractiveWebAssembly
+@inject IAccountClient Account
+
+<PageTitle>Dispositivi</PageTitle>
+
+<div class="page-header">
+    <h3>Dispositivi</h3>
+    <p>Ogni accesso — browser, app, terminale, agente esterno — è una sessione. Revocarla la chiude subito, anche le connessioni aperte.</p>
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger py-2" role="alert">@error</div>
+}
+@if (Sessions is null)
+{
+    <p class="text-muted">Caricamento…</p>
+}
+else
+{
+    <ul class="sessions">
+        @foreach (var s in Sessions)
+        {
+            <li class="session fade-in" @key="s.Id">
+                <span class="session-icon" aria-hidden="true">
+                    @if (s.Kind == "web") { <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></svg> }
+                    else if (s.Kind == "token") { <svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4" /><path d="m10.8 12.2 8.2-8.2M16 7l3 3M14 9l2 2" /></svg> }
+                    else { <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></svg> }
+                </span>
+                <div class="session-body">
+                    <div class="session-title">@Title(s) @if (s.Current) { <span class="badge bg-success ms-1">questo dispositivo</span> }</div>
+                    <div class="session-meta">@Kind(s.Kind) · dal @s.CreatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm")</div>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" @onclick="() => RevokeAsync(s)">@(s.Current ? "Esci" : "Revoca")</button>
+            </li>
+        }
+    </ul>
+    <button class="btn btn-outline-danger btn-sm mt-2" @onclick="RevokeAllAsync">Esci da tutti i dispositivi</button>
+}
+
+<h4 class="mt-4">Cambia password</h4>
+<form @onsubmit="ChangePasswordAsync" class="d-flex flex-column gap-2 mb-2" style="max-width: 360px">
+    <input class="form-control" type="password" autocomplete="current-password" @bind="currentPassword" @bind:event="oninput" placeholder="Password attuale" aria-label="Password attuale" />
+    <input class="form-control" type="password" autocomplete="new-password" @bind="newPassword" @bind:event="oninput" placeholder="Nuova password" aria-label="Nuova password" />
+    <input class="form-control" type="password" autocomplete="new-password" @bind="confirmPassword" @bind:event="oninput" placeholder="Ripeti la nuova password" aria-label="Ripeti la nuova password" />
+    <button class="btn btn-primary" type="submit" disabled="@(currentPassword.Length == 0 || newPassword.Length == 0)">Cambia password</button>
+    <div class="form-text">Almeno 6 caratteri con maiuscola, minuscola, numero e simbolo. Gli altri browser e app dovranno accedere di nuovo; i token MCP restano validi.</div>
+    @if (passwordMessage is { } pm) { <div class="@(pm.Ok ? "text-success" : "text-danger")" role="status">@pm.Text</div> }
+</form>
+
+<h4 class="mt-4">Token per agenti esterni (MCP)</h4>
+<p class="text-muted">Claude, Hermes e altri client MCP possono lavorare nel workspace come te tramite <code>@Mcp</code>: canali, messaggi, task e domande agli agenti, con i tuoi stessi permessi. Ogni token compare qui sopra come sessione "Token" e si revoca allo stesso modo.</p>
+<form @onsubmit="CreateTokenAsync" class="d-flex gap-2 mb-3">
+    <input class="form-control" style="max-width: 320px" @bind="tokenName" @bind:event="oninput" placeholder="es. claude-code, hermes" aria-label="Nome del token" maxlength="100" />
+    <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(tokenName)">Crea token</button>
+</form>
+@if (created is { } t)
+{
+    <div class="alert alert-warning">
+        <strong>Copia ora il token «@t.Name»: non verrà più mostrato.</strong>
+        <pre class="mt-2 mb-3 user-select-all" style="white-space: pre-wrap; word-break: break-all">@t.Token</pre>
+        <div class="small">
+            <strong>Claude Code</strong> (terminale):
+            <pre class="user-select-all" style="white-space: pre-wrap; word-break: break-all">claude mcp add --transport http agentweb @Mcp --header "Authorization: Bearer @t.Token"</pre>
+            <strong>Hermes</strong> (<code>~/.hermes/config.yaml</code>, sotto <code>mcp_servers:</code>), poi <code>hermes mcp test agentweb</code>:
+            <pre class="user-select-all">  agentweb:
+    url: @Mcp
+    headers:
+      Authorization: Bearer @t.Token</pre>
+            <strong>Altri client MCP</strong>: trasporto HTTP (Streamable) su <code>@Mcp</code> con l'header <code>Authorization: Bearer &lt;token&gt;</code>.
+        </div>
+    </div>
+}
+
+@code {
+    // Persistito dal prerender: il browser non richiede di nuovo l'elenco appena caricato sul server.
+    [PersistentState] public List<SessionDto>? Sessions { get; set; }
+    string? error;
+    string tokenName = "";
+    ApiTokenDto? created;
+
+    string Mcp => new Uri(Account.ServerBase, "mcp").ToString();
+
+    string currentPassword = "", newPassword = "", confirmPassword = "";
+    (bool Ok, string Text)? passwordMessage;
+
+    async Task ChangePasswordAsync()
+    {
+        if (newPassword != confirmPassword) { passwordMessage = (false, "Le due password nuove non coincidono."); return; }
+        try
+        {
+            await Account.ChangePasswordAsync(currentPassword, newPassword);
+            passwordMessage = (true, "Password cambiata. Le altre sessioni sono state chiuse.");
+            currentPassword = newPassword = confirmPassword = "";
+        }
+        catch (Exception ex) { passwordMessage = (false, ex.GetBaseException().Message); }
+        await LoadAsync();
+    }
+
+    async Task CreateTokenAsync()
+    {
+        try { created = await Account.CreateTokenAsync(tokenName.Trim()); tokenName = ""; }
+        catch (Exception ex) { error = ex.GetBaseException().Message; return; }
+        await LoadAsync();
+    }
+
+    protected override Task OnInitializedAsync() => Sessions is null ? LoadAsync() : Task.CompletedTask;
+
+    async Task LoadAsync()
+    {
+        try { Sessions = await Account.GetSessionsAsync(); error = null; }
+        catch (Exception ex) { error = ex.GetBaseException().Message; }
+    }
+
+    // La sessione corrente revocata: la prossima chiamata riceve 401 e web/app tornano al login da soli.
+    async Task RevokeAsync(SessionDto s)
+    {
+        try { await Account.RevokeSessionAsync(s.Id); }
+        catch (Exception ex) { error = ex.GetBaseException().Message; return; }
+        await LoadAsync();
+    }
+
+    async Task RevokeAllAsync()
+    {
+        try { await Account.RevokeAllSessionsAsync(); }
+        catch (Exception ex) { error = ex.GetBaseException().Message; return; }
+        await LoadAsync();
+    }
+
+    static string Kind(string k) => k switch { "web" => "Browser", "app" => "App / terminale", "token" => "Token per agenti (MCP)", _ => k };
+
+    // Nome leggibile dallo User-Agent salvato con la sessione (o il nome dato al token).
+    static string Title(SessionDto s)
+    {
+        var d = s.Device ?? "";
+        if (s.Kind == "token") return d.Length > 0 ? d : "Token";
+        if (d.StartsWith("AgentWeb-App/")) return "App AgentWeb " + (d.Contains("iOS") ? "· iPhone" : d.Contains("Android") ? "· Android" : "");
+        if (d.StartsWith("agentweb-cli/")) return "Terminale (agentweb)";
+        var browser = d.Contains("Edg/") ? "Edge" : d.Contains("Chrome/") ? "Chrome" : d.Contains("Firefox/") ? "Firefox" : d.Contains("Safari/") ? "Safari" : "Browser";
+        var os = d.Contains("Mac OS X") ? "macOS" : d.Contains("Windows") ? "Windows" : d.Contains("iPhone") ? "iPhone" : d.Contains("Android") ? "Android" : d.Contains("Linux") ? "Linux" : "";
+        return os.Length > 0 ? $"{browser} su {os}" : browser;
+    }
+}

@@ -1,0 +1,23 @@
+﻿@inherits LayoutComponentBase
+
+<div class="shell">
+    <aside class="sidebar">
+        <NavMenu />
+    </aside>
+
+    <div class="main">
+        <header class="topbar">
+            <UserBar />
+        </header>
+
+        <main class="content">
+            @Body
+        </main>
+    </div>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Si è verificato un errore imprevisto.
+    <a href="." class="reload">Ricarica</a>
+    <span class="dismiss" aria-label="Chiudi">✕</span>
+</div>
