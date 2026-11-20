@@ -23,6 +23,10 @@ public enum WorkStatus { Todo, InProgress, Done, Failed }
 public sealed record AgentRunDto(string Agent, int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double? Seconds, string? Error);
 public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Recent, List<TaskDto> OpenTasks);
 
+// Pagina Attività (inbox): una voce per canale (Root = null) o per thread che ti riguarda (scritto, risposto o menzionato).
+// Last: l'ultimo messaggio (del canale fuori dai thread, oppure del thread). Unread: messaggi altrui non ancora letti.
+public sealed record FeedItemDto(int ChannelId, string Channel, bool IsPrivate, MessageDto? Root, MessageDto Last, int Replies, int Unread);
+
 public sealed record TaskDto(int Id, int ChannelId, string Title, string Description, string? Assignee, bool AssigneeIsAgent,
     WorkStatus Status, string? Result, string CreatedBy, DateTimeOffset UpdatedAt);
 
@@ -83,6 +87,9 @@ public interface IWorkspaceClient
     Task<List<SearchHitDto>> SearchAsync(string query);
     Task<string> WhoAmIAsync(); // utente corrente (per riconoscere le proprie @menzioni)
     Task<ActivityDto> GetActivityAsync(); // cosa stanno facendo gli agenti, solo nei canali visibili
+    Task<List<FeedItemDto>> GetFeedAsync(); // inbox della pagina Attività, più recenti per primi
+    Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId);
+    Task MarkThreadReadAsync(int channelId, long rootId, long lastId); // segna letto il thread senza toccare il resto del canale
     Task<List<TaskDto>> GetTasksAsync(int channelId);
     Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task);
     Task SetTaskStatusAsync(int taskId, WorkStatus status);

@@ -86,6 +86,14 @@ public sealed class MessageEntity
 }
 
 // Fin dove un utente ha letto un canale: i non letti sono i messaggi altrui con Id maggiore. Avanza soltanto.
+// Thread letti dalla pagina Attività: vale il più avanti tra questo e il cursore del canale.
+public sealed class ThreadReadCursorEntity
+{
+    public string UserName { get; set; } = "";
+    public long RootId { get; set; }
+    public long LastReadId { get; set; }
+}
+
 public sealed class ReadCursorEntity
 {
     public string UserName { get; set; } = "";
@@ -155,6 +163,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
     public DbSet<ChannelAgentEntity> ChannelAgents => Set<ChannelAgentEntity>();
     public DbSet<MemoryEntity> Memories => Set<MemoryEntity>();
     public DbSet<ReadCursorEntity> ReadCursors => Set<ReadCursorEntity>();
+    public DbSet<ThreadReadCursorEntity> ThreadReadCursors => Set<ThreadReadCursorEntity>();
     public DbSet<DaemonDeliveryEntity> DaemonDeliveries => Set<DaemonDeliveryEntity>();
     public DbSet<DaemonMachineEntity> DaemonMachines => Set<DaemonMachineEntity>();
     public DbSet<PushDeviceEntity> PushDevices => Set<PushDeviceEntity>();
@@ -179,6 +188,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         // Ricerca full-text dei messaggi (to_tsvector 'simple': nessuna lingua imposta, parole intere).
         b.Entity<MessageEntity>().HasIndex(m => m.Text).HasMethod("GIN").IsTsVectorExpressionIndex("simple");
         b.Entity<ReadCursorEntity>().HasKey(r => new { r.UserName, r.ChannelId });
+        b.Entity<ThreadReadCursorEntity>().HasKey(r => new { r.UserName, r.RootId });
         b.Entity<DaemonDeliveryEntity>().HasIndex(d => new { d.Owner, d.Sid });
         b.Entity<DaemonMachineEntity>().HasKey(m => m.Sid);
         b.Entity<DaemonMachineEntity>().HasIndex(m => m.Owner);

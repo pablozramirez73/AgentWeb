@@ -132,4 +132,36 @@ public sealed class Phase10ThreadsUnreadSearchTests : IAsyncLifetime
         await PostAsync(alice, pub, "una volta");
         Assert.Single(await bobLive.CollectAsync(e => e.Kind == "message" && e.Message!.Text == "una volta", TimeSpan.FromSeconds(2)));
     }
+
+    // Pagina Attività: canali visibili + thread che mi riguardano; leggere un thread non segna letto il resto del canale.
+    [Fact]
+    public async Task Feed_ListsMyThreadsAndVisibleChannels_WithSeparateUnread()
+    {
+        var c = await ChannelAsync(alice, "inbox");
+        var secret = await ChannelAsync(alice, "segreto", isPrivate: true);
+        await PostAsync(alice, secret, "solo per alice");
+        var mine = await PostAsync(bob, c, "domanda di bob");
+        await PostAsync(alice, c, "risposta di alice", mine.Id);
+        var other = await PostAsync(alice, c, "@bob guarda qui");
+        await PostAsync(alice, c, "dettaglio", other.Id);
+        var unrelated = await PostAsync(alice, c, "thread non di bob");
+        await PostAsync(alice, c, "seguito", unrelated.Id);
+        await PostAsync(alice, c, "novità nel canale");
+
+        var feed = (await bob.GetFromJsonAsync<List<FeedItemDto>>("/api/workspace/feed"))!;
+        Assert.DoesNotContain(feed, f => f.ChannelId == secret);
+        var channel = Assert.Single(feed, f => f.Root is null && f.ChannelId == c);
+        Assert.Equal(("novità nel canale", 3), (channel.Last.Text, channel.Unread)); // i 3 messaggi di alice; le risposte nei thread non contano qui
+        var threads = feed.Where(f => f.Root is not null).ToList();
+        Assert.Equal(["@bob guarda qui", "domanda di bob"], threads.Select(t => t.Root!.Text)); // non quello che non lo riguarda
+        Assert.All(threads, t => Assert.Equal((1, 1), (t.Replies, t.Unread)));
+        Assert.Equal(feed.Select(f => f.Last.Id).OrderDescending(), feed.Select(f => f.Last.Id));
+
+        var t = threads[0];
+        (await bob.PostAsJsonAsync($"/api/workspace/channels/{c}/threads/{t.Root!.Id}/read", new MarkReadRequest(t.Last.Id))).EnsureSuccessStatusCode();
+        feed = (await bob.GetFromJsonAsync<List<FeedItemDto>>("/api/workspace/feed"))!;
+        Assert.Equal(0, feed.Single(f => f.Root?.Id == t.Root.Id).Unread);
+        Assert.Equal(3, feed.Single(f => f.Root is null && f.ChannelId == c).Unread);
+        Assert.Equal(HttpStatusCode.NotFound, (await bob.PostAsJsonAsync($"/api/workspace/channels/{secret}/threads/{t.Root.Id}/read", new MarkReadRequest(1))).StatusCode);
+    }
 }

@@ -69,6 +69,57 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             """);
     }
 
+    public async Task MarkThreadReadAsync(int channelId, string user, long rootId, long lastId)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
+        if (!await db.Messages.AnyAsync(m => m.Id == rootId && m.ChannelId == channelId && m.ParentId == null)) throw new KeyNotFoundException($"Thread {rootId} inesistente.");
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "ThreadReadCursors" ("UserName", "RootId", "LastReadId") VALUES ({user}, {rootId}, {lastId})
+            ON CONFLICT ("UserName", "RootId") DO UPDATE SET "LastReadId" = GREATEST("ThreadReadCursors"."LastReadId", EXCLUDED."LastReadId")
+            """);
+    }
+
+    // Inbox della pagina Attività: i canali visibili con l'ultimo messaggio fuori dai thread, più i thread che riguardano
+    // l'utente (radice o risposta sua, oppure una sua @menzione). Tutto passa da ChannelVisibility.
+    // shortcut: calcolato a ogni lettura (subquery per canale/thread, al massimo 40 thread); con molti dati servirebbe una proiezione mantenuta.
+    public async Task<List<FeedItemDto>> GetFeedAsync(string user)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        var mention = MentionPattern(user);
+        var visible = ChannelVisibility.Visible(db, user);
+        var channels = await visible.Select(c => new
+        {
+            c.Id, c.Name, c.IsPrivate,
+            Last = db.Messages.Where(m => m.ChannelId == c.Id && m.ParentId == null).OrderByDescending(m => m.Id).FirstOrDefault(),
+            Unread = db.Messages.Count(m => m.ChannelId == c.Id && m.ParentId == null && m.Author != user && m.Kind != AuthorKind.System
+                && m.Id > (db.ReadCursors.Where(r => r.ChannelId == c.Id && r.UserName == user).Select(r => (long?)r.LastReadId).FirstOrDefault() ?? 0)),
+        }).Where(x => x.Last != null).ToListAsync();
+
+        var threads = await db.Messages
+            .Where(r => r.ParentId == null && visible.Any(c => c.Id == r.ChannelId) && db.Messages.Any(x => x.ParentId == r.Id)
+                && (r.Author == user || EF.Functions.ILike(r.Text, mention, "\\")
+                    || db.Messages.Any(x => x.ParentId == r.Id && (x.Author == user || EF.Functions.ILike(x.Text, mention, "\\")))))
+            .Select(r => new
+            {
+                Root = r,
+                Last = db.Messages.Where(x => x.ParentId == r.Id).OrderByDescending(x => x.Id).First(),
+                Replies = db.Messages.Count(x => x.ParentId == r.Id),
+                Read = Math.Max(
+                    db.ReadCursors.Where(c => c.ChannelId == r.ChannelId && c.UserName == user).Select(c => (long?)c.LastReadId).FirstOrDefault() ?? 0,
+                    db.ThreadReadCursors.Where(c => c.RootId == r.Id && c.UserName == user).Select(c => (long?)c.LastReadId).FirstOrDefault() ?? 0),
+            })
+            .OrderByDescending(x => x.Last.Id).Take(40)
+            .Select(x => new { x.Root, x.Last, x.Replies, Unread = db.Messages.Count(m => m.ParentId == x.Root.Id && m.Author != user && m.Id > x.Read) })
+            .ToListAsync();
+
+        var byId = channels.ToDictionary(c => c.Id);
+        return channels.Select(c => new FeedItemDto(c.Id, c.Name, c.IsPrivate, null, ToDto(c.Last!), 0, c.Unread))
+            .Concat(threads.Select(t => new FeedItemDto(t.Root.ChannelId, byId.TryGetValue(t.Root.ChannelId, out var c) ? c.Name : "", byId.TryGetValue(t.Root.ChannelId, out var p) && p.IsPrivate,
+                ToDto(t.Root), ToDto(t.Last), t.Replies, t.Unread)))
+            .OrderByDescending(f => f.Last.Id).ToList();
+    }
+
     // Ricerca full-text su tutti i canali visibili (stessa regola di ChannelVisibility), i più recenti per primi.
     // Attività visibile all'utente: lavori degli agenti e task aperti dei soli canali che vede (ChannelVisibility).
     public async Task<ActivityDto> GetActivityAsync(string user, AgentActivity activity)

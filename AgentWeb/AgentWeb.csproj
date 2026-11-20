@@ -68,6 +68,10 @@
   <PropertyGroup>
     <AgentWebServer Condition="'$(AgentWebServer)' == ''">http://localhost:5294/</AgentWebServer>
   </PropertyGroup>
+  <!-- Notifiche APNs: servono un account Apple Developer a pagamento e un profilo con Push Notifications. dotnet build -p:ApnsPush=true -->
+  <PropertyGroup Condition="'$(ApnsPush)' == 'true' And $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <CodesignEntitlements>Platforms/iOS/Entitlements.Push.plist</CodesignEntitlements>
+  </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="AgentWebServer" Value="$(AgentWebServer)" />
   </ItemGroup>

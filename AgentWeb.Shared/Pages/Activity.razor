@@ -2,94 +2,325 @@
 @rendermode InteractiveWebAssembly
 @implements IAsyncDisposable
 @inject IWorkspaceClient Ws
+@inject IJSRuntime JS
 
 <PageTitle>Attività · AgentWeb</PageTitle>
 
-<div class="page-header">
-    <h3>Attività</h3>
-    <p>Cosa stanno facendo gli agenti adesso, cosa hanno appena finito e i task ancora aperti, nei canali che vedi. Si aggiorna da sola.</p>
+@* Inbox a due colonne: a sinistra le conversazioni che ti riguardano (canali e thread), a destra quella aperta, con risposta diretta. *@
+<div class="activity @(selected is null ? "" : "has-selection")">
+    <section class="inbox" aria-label="Attività">
+        <header class="inbox-head">
+            <h2>Attività</h2>
+            <span class="inbox-count">@Running.Count in corso · @feed.Sum(f => f.Unread) non letti</span>
+        </header>
+        <div class="inbox-tools">
+            <label class="filter">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+                <select @bind="filter" aria-label="Filtra">
+                    <option value="all">Tutto</option>
+                    <option value="unread">Non letti</option>
+                    <option value="threads">Thread</option>
+                    <option value="channels">Canali</option>
+                    <option value="agents">Agenti</option>
+                </select>
+            </label>
+        </div>
+        @if (error is not null) { <div class="alert alert-danger py-2 mx-3" role="alert">@error</div> }
+
+        <div class="inbox-list">
+            @if (loading) { <p class="text-muted px-3">Caricamento…</p> }
+            @if (filter is "all" or "agents" && Running.Count > 0)
+            {
+                <div class="day">In corso</div>
+                @foreach (var r in Running)
+                {
+                    <button class="item" @onclick="() => Open(r.ChannelId, null)">
+                        <span class="item-icon">@AgentAvatar(r.Agent, "2.25rem")<span class="pulse" aria-hidden="true"></span></span>
+                        <span class="item-body">
+                            <span class="item-title">@r.Agent</span>
+                            <span class="item-preview">@Kind(r.Kind) in #@r.Channel · da @Since(r.StartedAt)</span>
+                        </span>
+                    </button>
+                }
+            }
+            @if (filter == "agents")
+            {
+                <div class="day">Appena terminati</div>
+                @if (activity?.Recent.Count is null or 0) { <p class="text-muted px-3 small">Ancora niente da quando il server è partito.</p> }
+                @foreach (var r in activity?.Recent ?? [])
+                {
+                    <button class="item @(r.Error is null ? "" : "failed")" @onclick="() => Open(r.ChannelId, null)">
+                        <span class="item-icon">@AgentAvatar(r.Agent, "2.25rem")</span>
+                        <span class="item-body">
+                            <span class="item-title">@r.Agent <span class="item-tag">@(r.Error is null ? "✓" : "✕ errore")</span></span>
+                            <span class="item-preview">@(r.Error ?? $"{Kind(r.Kind)} in #{r.Channel} · {r.Seconds:0.0} s")</span>
+                        </span>
+                        <time>@r.StartedAt.ToLocalTime().ToString("HH:mm")</time>
+                    </button>
+                }
+            }
+            else
+            {
+                @if (!loading && Visible.Count == 0) { <p class="text-muted px-3 small">Niente da mostrare qui.</p> }
+                @foreach (var day in Visible.GroupBy(f => f.Last.At.ToLocalTime().Date))
+                {
+                    <div class="day">@DayLabel(day.Key)</div>
+                    @foreach (var f in day)
+                    {
+                        <button class="item @(f.Unread > 0 ? "unread" : "") @(IsSelected(f) ? "selected" : "")" @key="Key(f)" @onclick="() => Open(f.ChannelId, f.Root?.Id)">
+                            <span class="item-icon tile">
+                                @if (f.Root is not null)
+                                {
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4Z" /></svg>
+                                    <span class="tile-badge">@(f.IsPrivate ? "🔒" : "#")</span>
+                                }
+                                else if (f.IsPrivate) { <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg> }
+                                else { <span class="hash" aria-hidden="true">#</span> }
+                            </span>
+                            <span class="item-body">
+                                <span class="item-title">@(f.Root is { } r ? Short(r.Text, 60) : f.Channel)</span>
+                                <span class="item-preview">
+                                    @if (f.Root is not null) { <span class="item-channel">#@f.Channel ·</span> }
+                                    @if (f.Last.Kind == AuthorKind.Agent) { @AgentAvatar(f.Last.Author, "1.1rem") }
+                                    <strong>@Name(f.Last.Author):</strong> @Short(f.Last.Text, 90)
+                                </span>
+                            </span>
+                            <span class="item-side">
+                                <time>@f.Last.At.ToLocalTime().ToString("HH:mm")</time>
+                                @if (f.Unread > 0) { <span class="badge-unread">@f.Unread</span> }
+                            </span>
+                        </button>
+                    }
+                }
+            }
+        </div>
+    </section>
+
+    <section class="conversation" aria-label="Conversazione">
+        @if (selected is not { } sel)
+        {
+            <div class="empty">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
+                <p>Scegli una conversazione a sinistra.</p>
+            </div>
+        }
+        else
+        {
+            var item = feed.FirstOrDefault(f => f.ChannelId == sel.ChannelId && f.Root?.Id == sel.RootId);
+            var channelName = item?.Channel ?? Running.FirstOrDefault(r => r.ChannelId == sel.ChannelId)?.Channel ?? "";
+            var people = conversation.Where(m => m.Kind != AuthorKind.System).Select(m => (m.Author, m.Kind)).Distinct().ToList();
+            <header class="conv-head">
+                <button class="btn btn-icon conv-back" aria-label="Torna all'elenco" @onclick="Close">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+                </button>
+                <div class="conv-title">
+                    <strong>@(sel.RootId is not null && conversation.FirstOrDefault() is { } root ? $"{Name(root.Author)}: {Short(root.Text, 90)}" : $"#{channelName}")</strong>
+                    <span class="conv-meta">
+                        <a href="channels/@sel.ChannelId">#@channelName</a>
+                        @if (sel.RootId is not null) { <span> · @(conversation.Count - 1) risposte</span> }
+                    </span>
+                </div>
+                <span class="people" title="@string.Join(", ", people.Select(p => Name(p.Author)))">
+                    @foreach (var p in people.Take(3))
+                    {
+                        if (p.Kind == AuthorKind.Agent) { @AgentAvatar(p.Author, "1.6rem") }
+                        else { <span class="avatar" style="--size: 1.6rem">@Initials(p.Author)</span> }
+                    }
+                    @if (people.Count > 3) { <span class="people-more">+@(people.Count - 3)</span> }
+                </span>
+                <button class="btn btn-icon" aria-label="Chiudi" @onclick="Close">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                </button>
+            </header>
+
+            @* column-reverse: si apre già in fondo e resta in fondo quando arrivano messaggi, senza JavaScript. *@
+            <div class="conv-scroll">
+                <div class="conv-messages">
+                    @for (var i = 0; i < conversation.Count; i++)
+                    {
+                        var m = conversation[i];
+                        if (m.Kind == AuthorKind.System)
+                        {
+                            <div class="msg-system" @key="m.Id">@m.Text <time>@m.At.ToLocalTime().ToString("HH:mm")</time></div>
+                            continue;
+                        }
+                        var prev = i > 0 ? conversation[i - 1] : null;
+                        var grouped = prev is not null && prev.Id != sel.RootId && prev.Kind != AuthorKind.System && prev.Author == m.Author && m.At - prev.At < TimeSpan.FromMinutes(5);
+                        <article class="msg @(grouped ? "grouped" : "") @(sel.RootId == m.Id ? "root" : "")" @key="m.Id">
+                            <span class="msg-avatar">
+                                @if (!grouped)
+                                {
+                                    if (m.Kind == AuthorKind.Agent) { @AgentAvatar(m.Author, "2.25rem") }
+                                    else { <span class="avatar" style="--size: 2.25rem">@Initials(m.Author)</span> }
+                                }
+                            </span>
+                            <div class="msg-body">
+                                @if (!grouped)
+                                {
+                                    <div class="msg-head">
+                                        <strong>@Name(m.Author)</strong>
+                                        @if (m.Kind == AuthorKind.Agent) { <span class="item-tag">agente</span> }
+                                        <time>@m.At.ToLocalTime().ToString("dd/MM HH:mm")</time>
+                                    </div>
+                                }
+                                <div class="msg-text">@m.Text</div>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </div>
+
+            <form class="conv-composer" @onsubmit="SendAsync">
+                <textarea @ref="composer" rows="1" maxlength="4000" @bind="draft" @bind:event="oninput"
+                          placeholder="@(sel.RootId is null ? $"Scrivi in #{channelName}" : "Rispondi nel thread")" aria-label="Messaggio"></textarea>
+                <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="Invia">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                </button>
+            </form>
+        }
+    </section>
 </div>
 
-@if (error is not null) { <div class="alert alert-danger py-2" role="alert">@error</div> }
-@if (data is null)
-{
-    <p class="text-muted">Caricamento…</p>
-}
-else
-{
-    <h4>In corso</h4>
-    @if (data.Running.Count == 0) { <p class="text-muted">Nessun agente al lavoro.</p> }
-    <ul class="runs">
-        @foreach (var r in data.Running)
-        {
-            <li class="run running">
-                <span class="dot" aria-hidden="true"></span>
-                <strong>@r.Agent</strong> · @r.Kind in <a href="channels/@r.ChannelId">#@r.Channel</a>
-                <span class="text-muted">da @Since(r.StartedAt)</span>
-            </li>
-        }
-    </ul>
-
-    <h4 class="mt-4">Task aperti</h4>
-    @if (data.OpenTasks.Count == 0) { <p class="text-muted">Nessun task aperto.</p> }
-    <ul class="runs">
-        @foreach (var t in data.OpenTasks)
-        {
-            <li class="run">
-                <span class="badge @(t.Status == WorkStatus.InProgress ? "bg-primary" : "bg-secondary")">@(t.Status == WorkStatus.InProgress ? "in corso" : "da fare")</span>
-                <a href="channels/@t.ChannelId">#@t.Id @t.Title</a>
-                <span class="text-muted">@(t.Assignee is { } a ? "· " + a : "· non assegnato")</span>
-            </li>
-        }
-    </ul>
-
-    <h4 class="mt-4">Appena terminati</h4>
-    @if (data.Recent.Count == 0) { <p class="text-muted">Ancora niente da quando il server è partito.</p> }
-    <ul class="runs">
-        @foreach (var r in data.Recent)
-        {
-            <li class="run @(r.Error is null ? "" : "failed")">
-                <span>@(r.Error is null ? "✓" : "✕")</span>
-                <strong>@r.Agent</strong> · @r.Kind in <a href="channels/@r.ChannelId">#@r.Channel</a>
-                <span class="text-muted">@r.StartedAt.ToLocalTime().ToString("HH:mm:ss") · @(r.Seconds?.ToString("0.0")) s</span>
-                @if (r.Error is { } e) { <div class="text-danger small">@e</div> }
-            </li>
-        }
-    </ul>
-}
-
 @code {
-    ActivityDto? data;
+    List<FeedItemDto> feed = [];
+    ActivityDto? activity;
+    List<MessageDto> conversation = [];
+    (int ChannelId, long? RootId)? selected;
+    string filter = "all", draft = "";
     string? error;
+    bool loading = true;
+    ElementReference composer;
+    IJSObjectReference? module;
+    Dictionary<string, string> agentIcons = new(StringComparer.OrdinalIgnoreCase);
     readonly CancellationTokenSource stop = new();
+    CancellationTokenSource? pendingReload;
+
+    List<AgentRunDto> Running => activity?.Running ?? [];
+
+    List<FeedItemDto> Visible => filter switch
+    {
+        "unread" => feed.Where(f => f.Unread > 0).ToList(),
+        "threads" => feed.Where(f => f.Root is not null).ToList(),
+        "channels" => feed.Where(f => f.Root is null).ToList(),
+        _ => feed,
+    };
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadAsync();
-        if (!OperatingSystem.IsBrowser() && !OperatingSystem.IsIOS() && !OperatingSystem.IsAndroid()) return; // prerender: niente timer sul server
-        _ = RefreshLoopAsync();
+        await Run(async () =>
+        {
+            await Ws.StartAsync();
+            Ws.Changed += OnEvent;
+            feed = await Ws.GetFeedAsync();
+            activity = await Ws.GetActivityAsync();
+        });
+        loading = false;
+        if (!OperatingSystem.IsBrowser() && !OperatingSystem.IsIOS() && !OperatingSystem.IsAndroid()) return; // prerender: niente timer né icone
+        try { agentIcons = (await Ws.GetAgentIconsAsync()).ToDictionary(i => i.Key, i => "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(i.Value)), StringComparer.OrdinalIgnoreCase); }
+        catch (Exception) { } // senza icone restano i simboli
+        _ = RefreshAgentsAsync();
     }
 
-    // shortcut: aggiornamento ogni 3 secondi invece di un evento dedicato; basta per una pagina di controllo.
-    async Task RefreshLoopAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        if (selected is null) return;
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AgentWeb.Shared/Pages/Channels.razor.js");
+            await module.InvokeVoidAsync("enterToSend", composer); // Invio per inviare, Maiusc+Invio a capo
+        }
+        catch (JSException) { } // senza JS resta il pulsante Invia
+    }
+
+    // shortcut: lavori degli agenti ogni 5 s invece di un evento dedicato; i messaggi invece arrivano come eventi.
+    async Task RefreshAgentsAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         try
         {
             while (await timer.WaitForNextTickAsync(stop.Token))
             {
-                await LoadAsync();
+                try { activity = await Ws.GetActivityAsync(); } catch (Exception) { continue; }
                 await InvokeAsync(StateHasChanged);
             }
         }
         catch (OperationCanceledException) { }
     }
 
-    async Task LoadAsync()
+    // Ogni messaggio dei canali visibili: entra nella conversazione aperta se le appartiene, e l'elenco si ricarica (al massimo uno ogni 400 ms).
+    void OnEvent(WorkspaceEvent e)
     {
-        try { data = await Ws.GetActivityAsync(); error = null; }
+        if (e is not { Kind: "message", Message: { } m }) return;
+        _ = InvokeAsync(async () =>
+        {
+            if (selected is { } s && m.ChannelId == s.ChannelId && (s.RootId is { } root ? m.ParentId == root : m.ParentId is null)
+                && conversation.All(x => x.Id != m.Id))
+            {
+                conversation.Add(m);
+                await MarkReadAsync();
+            }
+            pendingReload?.Cancel();
+            var cts = pendingReload = new();
+            try { await Task.Delay(400, cts.Token); } catch (OperationCanceledException) { return; }
+            try { feed = await Ws.GetFeedAsync(); } catch (Exception) { }
+            StateHasChanged();
+        });
+    }
+
+    Task Open(int channelId, long? rootId) => Run(async () =>
+    {
+        selected = (channelId, rootId);
+        draft = "";
+        conversation = rootId is { } r ? await Ws.GetThreadAsync(channelId, r)
+            : (await Ws.GetMessagesAsync(channelId)).Where(m => m.ParentId is null).TakeLast(200).ToList();
+        await MarkReadAsync();
+    });
+
+    void Close() => selected = null;
+
+    // Thread: solo il suo cursore (il resto del canale resta da leggere). Canale: il cursore del canale.
+    async Task MarkReadAsync()
+    {
+        if (selected is not { } s || conversation.LastOrDefault()?.Id is not { } last) return;
+        try
+        {
+            if (s.RootId is { } root) await Ws.MarkThreadReadAsync(s.ChannelId, root, last);
+            else await Ws.MarkReadAsync(s.ChannelId, last);
+            var i = feed.FindIndex(f => f.ChannelId == s.ChannelId && f.Root?.Id == s.RootId);
+            if (i >= 0) feed[i] = feed[i] with { Unread = 0 };
+        }
+        catch (Exception) { } // si riprova al prossimo messaggio
+    }
+
+    Task SendAsync() => Run(async () =>
+    {
+        if (selected is not { } s || string.IsNullOrWhiteSpace(draft)) return;
+        var text = draft.Trim();
+        draft = "";
+        await Ws.SendMessageAsync(s.ChannelId, text, s.RootId); // il messaggio torna come evento e compare nella conversazione
+    });
+
+    async Task Run(Func<Task> action)
+    {
+        error = null;
+        try { await action(); }
         catch (Exception ex) { error = ex.GetBaseException().Message; }
     }
+
+    bool IsSelected(FeedItemDto f) => selected is { } s && s.ChannelId == f.ChannelId && s.RootId == f.Root?.Id;
+    static string Key(FeedItemDto f) => f.Root is { } r ? $"t{r.Id}" : $"c{f.ChannelId}";
+
+    static readonly string[] Days = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
+    static readonly string[] Months = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
+
+    static string DayLabel(DateTime d)
+    {
+        var today = DateTime.Now.Date;
+        return d == today ? "Oggi" : d == today.AddDays(-1) ? "Ieri"
+            : $"{Days[(int)d.DayOfWeek]} {d.Day} {Months[d.Month - 1]}{(d.Year == today.Year ? "" : $" {d.Year}")}";
+    }
+
+    static string Kind(string kind) => kind == "task" ? "lavora a un task" : "risponde";
 
     static string Since(DateTimeOffset t)
     {
@@ -97,5 +328,36 @@ else
         return s < 60 ? $"{s:0} s" : $"{s / 60:0} min";
     }
 
-    public ValueTask DisposeAsync() { stop.Cancel(); stop.Dispose(); return ValueTask.CompletedTask; }
+    static string Short(string text, int max)
+    {
+        text = text.ReplaceLineEndings(" ");
+        return text.Length > max ? text[..max] + "…" : text;
+    }
+
+    static string Name(string author) => author.Split('@')[0];
+
+    static string Initials(string user)
+    {
+        var parts = Name(user).Split(['.', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}" : Name(user)[..Math.Min(2, Name(user).Length)];
+    }
+
+    // SVG come data URI dentro <img>: il browser non esegue script né carica risorse esterne.
+    RenderFragment AgentAvatar(string name, string size) =>
+        @<span class="avatar avatar-agent @(agentIcons.ContainsKey(name) ? "avatar-icon" : "")" style="--size: @size" aria-hidden="true">@if (agentIcons.TryGetValue(name, out var src))
+        {
+            <img src="@src" alt="" />
+        }
+        else
+        {
+            <text>✦</text>
+        }</span>;
+
+    public async ValueTask DisposeAsync()
+    {
+        Ws.Changed -= OnEvent;
+        stop.Cancel(); stop.Dispose();
+        pendingReload?.Cancel();
+        if (module is not null) try { await module.DisposeAsync(); } catch (JSDisconnectedException) { }
+    }
 }
