@@ -15,3 +15,5 @@ agentsettings.json
 
 # Chiavi VAPID generate al primo avvio (private)
 vapid-keys.json
+# Icone degli agenti generate dal server (cache)
+agent-icons/
