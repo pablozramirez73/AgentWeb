@@ -33,7 +33,11 @@
 
   <ItemGroup>
     <!-- App Icon -->
-    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+    <!-- Il bundle .icon lo compila actool: i suoi file non vanno copiati nell'app come contenuto (iOS rifiuta la cartella Resources). -->
+    <Content Remove="Resources\AppIcon\AppIcon.icon\**" />
+    <!-- iOS/Mac: icona Liquid Glass di Icon Composer (livelli in vetro); Android: lo stesso disegno in SVG. -->
+    <MauiIcon Include="Resources\AppIcon\AppIcon.icon" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' Or $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'" />
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#2A1C7A" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'ios' And $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'maccatalyst'" />
 
     <!-- Splash Screen -->
     <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />

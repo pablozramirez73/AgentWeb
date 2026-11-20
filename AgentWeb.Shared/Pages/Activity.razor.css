@@ -1,0 +1,6 @@
+.runs { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .4rem; }
+.run { padding: .55rem .8rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); display: flex; flex-wrap: wrap; gap: .4rem; align-items: baseline; }
+.run.failed { border-color: var(--bs-danger, #c0392b); }
+.dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--ink, currentColor); align-self: center; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } }

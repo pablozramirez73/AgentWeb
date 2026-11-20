@@ -123,8 +123,13 @@ public sealed class Phase10ThreadsUnreadSearchTests : IAsyncLifetime
         await PostAsync(alice, priv, "solo per alice");
         await PostAsync(alice, pub, "per tutti");
 
-        var got = await bobLive.CollectAsync(e => e.Kind == "activity", TimeSpan.FromSeconds(3));
-        Assert.Equal(["per tutti"], got.Select(e => e.Message!.Text));
-        Assert.All(got, e => Assert.Equal(pub, e.ChannelId));
+        var got = await bobLive.CollectAsync(e => e.Kind is "message" or "activity", TimeSpan.FromSeconds(3));
+        Assert.Equal(["message:per tutti", "activity:per tutti"], got.Select(e => $"{e.Kind}:{e.Message!.Text}"));
+        Assert.All(got, e => Assert.Equal(pub, e.ChannelId)); // anche la copia per le app vecchie rispetta la visibilità
+
+        // Chi guarda il canale riceve ogni messaggio una volta sola.
+        Assert.True(await bobLive.WatchAsync(pub));
+        await PostAsync(alice, pub, "una volta");
+        Assert.Single(await bobLive.CollectAsync(e => e.Kind == "message" && e.Message!.Text == "una volta", TimeSpan.FromSeconds(2)));
     }
 }

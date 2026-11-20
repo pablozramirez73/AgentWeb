@@ -19,6 +19,10 @@ public sealed record MarkReadRequest(long LastId);
 
 public enum WorkStatus { Todo, InProgress, Done, Failed }
 
+// Pagina Attività: lavori degli agenti in corso e ultimi terminati (Seconds/Error), task aperti.
+public sealed record AgentRunDto(string Agent, int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double? Seconds, string? Error);
+public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Recent, List<TaskDto> OpenTasks);
+
 public sealed record TaskDto(int Id, int ChannelId, string Title, string Description, string? Assignee, bool AssigneeIsAgent,
     WorkStatus Status, string? Result, string CreatedBy, DateTimeOffset UpdatedAt);
 
@@ -27,8 +31,8 @@ public sealed record NewTaskRequest(string Title, string Description, string? As
     public const string Me = "\u0001me"; // Assignee speciale: il server lo sostituisce con l'utente che crea il task
 }
 
-// Un solo tipo di evento in tempo reale: Kind = "channel" | "message" | "task" | "typing" | "agents" | "resync" | "activity".
-// "activity": nuovo messaggio in un canale che l'utente vede ma non sta guardando (serve ai badge dei non letti).
+// Un solo tipo di evento in tempo reale: Kind = "channel" | "message" | "task" | "typing" | "agents" | "resync".
+// "message" arriva per ogni canale che l'utente vede (una volta sola): quello osservato lo mostra, gli altri aggiornano i badge dei non letti.
 // "typing": Agent = chi sta scrivendo/lavorando, Human = true se è una persona. "agents": cambiati gli agenti del canale.
 // "resync" lo genera il client dopo una riconnessione lunga: la pagina recupera i messaggi persi.
 public sealed record WorkspaceEvent(string Kind, int ChannelId, MessageDto? Message = null, TaskDto? Task = null,
@@ -78,6 +82,7 @@ public interface IWorkspaceClient
     Task MarkReadAsync(int channelId, long lastId); // il cursore avanza soltanto
     Task<List<SearchHitDto>> SearchAsync(string query);
     Task<string> WhoAmIAsync(); // utente corrente (per riconoscere le proprie @menzioni)
+    Task<ActivityDto> GetActivityAsync(); // cosa stanno facendo gli agenti, solo nei canali visibili
     Task<List<TaskDto>> GetTasksAsync(int channelId);
     Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task);
     Task SetTaskStatusAsync(int taskId, WorkStatus status);

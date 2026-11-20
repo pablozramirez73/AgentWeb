@@ -27,6 +27,7 @@ public sealed class TestApp(Dictionary<string, string?>? settings = null, string
         b.UseSetting("ConnectionStrings:Default", TestDb.ConnectionString(Database));
         b.UseSetting("AgentSettings:Path", Path.Combine(Dir, "agentsettings.json")); // mai le impostazioni reali dell'utente
         b.UseSetting("Auth:RateLimitPerMinute", "10000");
+        b.UseSetting("OTEL_EXPORTER_OTLP_ENDPOINT", ""); // i test non mandano telemetria al Grafana locale
         foreach (var (k, v) in settings ?? []) b.UseSetting(k, v);
     }
 

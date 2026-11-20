@@ -6,3 +6,12 @@
 .tool span { display: flex; flex-direction: column; min-width: 0; }
 .tool strong { font-size: .84rem; font-weight: 600; }
 .tool small { color: var(--muted); font-size: .74rem; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; }
+
+.save-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding: .75rem 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+}

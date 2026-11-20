@@ -38,7 +38,8 @@ public static class CliApp
           task done <id> | task reopen <id>
 
         Daemon (agenti che girano su questo computer: un admin li lega al tuo utente con LLM "daemon")
-          daemon --runtime NOME=COMANDO [--runtime …] [--machine NOME] [--env VAR,VAR] [--parallel N]
+          daemon --runtime NOME=COMANDO [--runtime …] [--machine NOME] [--env VAR,VAR] [--parallel N] [--as-user UTENTE]
+                 --as-user: il runtime gira come un altro utente del sistema (sudo -n), così non può leggere le tue credenziali
                  ogni runtime legge il prompt da stdin e scrive la risposta su stdout, es. --runtime claude="claude -p"
           daemon status                                            i tuoi daemon collegati
           daemon install <stesse opzioni> | daemon uninstall        avvio automatico (launchd/systemd utente)
@@ -81,6 +82,7 @@ public static class CliApp
                 case "logout": return await LogoutAsync(env, store);
                 case "daemon" when a.Positional.ElementAtOrDefault(1) is "install" or "uninstall": return Service(a, env);
             }
+            if (command == "daemon") Daemon.CheckOptions(a.Many("--runtime").Count, DaemonEnv(a), a.Opt("--as-user"));
             var api = Connect(env, store);
             return command switch
             {
@@ -128,8 +130,8 @@ public static class CliApp
                 "user create" => await CreateUserAsync(env, a, api),
                 "daemon" => await Daemon.RunAsync(api, env, a.Many("--runtime").Select(Daemon.ParseRuntime).ToList(),
                     a.Opt("--machine") ?? Environment.MachineName,
-                    (a.Opt("--env") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
-                    a.Opt("--parallel") is { } p ? Int(p) : 1),
+                    DaemonEnv(a),
+                    a.Opt("--parallel") is { } p ? Int(p) : 1, a.Opt("--as-user")),
                 "daemon status" => Print(env, a, await api.GetAsync<List<MachineDto>>("api/daemon/machines"),
                     l => Lines(l, m => $"{m.Machine}  runtime: {string.Join(", ", m.Runtimes)}  in corso: {m.Running}  visto {m.LastSeen.ToLocalTime():HH:mm:ss}")),
                 _ => throw new CliException($"Comando sconosciuto: {command}. Usa `agentweb --help`.", ExitCodes.Usage),
@@ -259,13 +261,16 @@ public static class CliApp
         return await Done(env, a, api.PostAsync($"api/workspace/channels/{channel}/read", new MarkReadRequest(last)));
     }
 
+    static List<string> DaemonEnv(Args a) => (a.Opt("--env") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
     // Scrive (o rimuove) il file di avvio automatico; caricarlo resta un comando esplicito dell'utente.
     static int Service(Args a, CliEnvironment env)
     {
-        var keep = new[] { "--runtime", "--machine", "--env", "--parallel" };
+        var keep = new[] { "--runtime", "--machine", "--env", "--parallel", "--as-user" };
         var args = keep.SelectMany(k => a.Many(k).SelectMany(v => new[] { k, v })).ToList();
         if (a.Positional[1] == "install" && a.Many("--runtime").Count == 0) throw new CliException("Indica almeno un --runtime nome=comando.", ExitCodes.Usage);
         foreach (var r in a.Many("--runtime")) Daemon.ParseRuntime(r); // errori di sintassi subito, non al primo avvio
+        if (a.Positional[1] == "install") Daemon.CheckOptions(a.Many("--runtime").Count, DaemonEnv(a), a.Opt("--as-user"));
         var (path, content, hint) = Daemon.ServiceFile(env.ExecutablePath, args, Environment.GetEnvironmentVariable("AGENTWEB_CONFIG_DIR"));
         if (a.Positional[1] == "uninstall")
         {

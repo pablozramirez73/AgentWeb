@@ -139,7 +139,7 @@ public sealed class AgentRuntime(LlmClients llms, AgentSettingsStore store, Work
 // Parallelo: fino a Agents:MaxParallel job insieme (default: numero di core). Due job dello stesso agente nello stesso canale
 // restano in ordine (la seconda risposta vede la prima); agenti diversi, o canali diversi, lavorano contemporaneamente.
 public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntime runtime, AgentSettingsStore settings, WorkspaceBus bus,
-    MemoryStore memory, LlmClients llms, IConfiguration config, ILogger<AgentWorker> log) : BackgroundService
+    MemoryStore memory, LlmClients llms, AgentActivity activity, IConfiguration config, ILogger<AgentWorker> log) : BackgroundService
 {
     readonly int parallelism = Math.Max(1, config.GetValue("Agents:MaxParallel", Environment.ProcessorCount));
     readonly KeyedLocks conversations = new();
@@ -162,9 +162,12 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
         bus.Publish(new("typing", job.ChannelId, Agent: job.Agent, Typing: true));
         try
         {
-            if (job.TaskId is { } id) await RunTaskAsync(job, id, ct);
-            else await ReplyAsync(job, ct);
-            await SummarizeAsync(job, ct);
+            await activity.TrackAsync(job, async () =>
+            {
+                if (job.TaskId is { } id) await RunTaskAsync(job, id, ct);
+                else await ReplyAsync(job, ct);
+                await SummarizeAsync(job, ct);
+            });
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

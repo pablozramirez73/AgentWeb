@@ -69,6 +69,8 @@ public sealed class Phase3AuthorizationTests(MatrixWorld w) : IClassFixture<Matr
         { "carol", "POST", "/api/workspace/channels/{P}/read", 404 },
         { "anon", "GET", "/api/workspace/search?q=piano", 401 },
         { "bob", "GET", "/api/workspace/search?q=piano", 200 },
+        { "anon", "GET", "/api/workspace/activity", 401 },
+        { "bob", "GET", "/api/workspace/activity", 200 },
         { "anon", "GET", "/api/daemon/machines", 401 },
         { "anon", "POST", "/api/daemon/poll", 401 },
         { "bob", "POST", "/api/daemon/deliveries/inesistente/complete", 404 },
@@ -168,6 +170,13 @@ public sealed class Phase13OpsTests
         Assert.Equal(first, await alice.GetStringAsync("/openapi/v1.json"));
         Assert.Contains("/api/workspace/channels", first);
         Assert.Contains("/api/daemon/poll", first);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(first);
+        Assert.StartsWith("3.2", doc.RootElement.GetProperty("openapi").GetString()); // default di ASP.NET Core 11
+        Assert.Equal("bearer", doc.RootElement.GetProperty("components").GetProperty("securitySchemes").GetProperty("Bearer").GetProperty("scheme").GetString());
+        var paths = doc.RootElement.GetProperty("paths");
+        Assert.True(paths.GetProperty("/api/workspace/channels").GetProperty("get").TryGetProperty("security", out _));
+        Assert.False(paths.GetProperty("/healthz").GetProperty("get").TryGetProperty("security", out _)); // pubblico
     }
 
     [Fact]
@@ -175,5 +184,18 @@ public sealed class Phase13OpsTests
     {
         using var app = new TestApp();
         Assert.Equal(HttpStatusCode.OK, (await app.CreateClient().GetAsync("/healthz")).StatusCode);
+    }
+
+    // Chi accetta zstd (app MAUI, CLI, browser recenti) lo riceve; gli altri restano su br/gzip.
+    [Fact]
+    public async Task Responses_AreZstdCompressed_WhenTheClientAcceptsIt()
+    {
+        using var app = new TestApp();
+        var req = new HttpRequestMessage(HttpMethod.Get, "/healthz");
+        req.Headers.AcceptEncoding.ParseAdd("zstd, br, gzip");
+        var res = await app.CreateClient().SendAsync(req);
+        Assert.Equal("zstd", Assert.Single(res.Content.Headers.ContentEncoding));
+        await using var body = new System.IO.Compression.ZstandardStream(await res.Content.ReadAsStreamAsync(), System.IO.Compression.CompressionMode.Decompress);
+        Assert.Equal("\"ok\"", await new StreamReader(body).ReadToEndAsync());
     }
 }

@@ -11,7 +11,7 @@ public sealed class CliEnvironment
     public required string ConfigDir { get; init; }
     public bool Interactive { get; init; }
     public Func<string?>? ReadSecret { get; init; } // prompt senza eco; null se non c'è un terminale
-    public Func<HttpMessageHandler> CreateHandler { get; init; } = () => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(10) };
+    public Func<HttpMessageHandler> CreateHandler { get; init; } = () => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(10), AutomaticDecompression = System.Net.DecompressionMethods.All }; // zstd, br, gzip
     public string? DefaultServer { get; init; }
     public CancellationToken Cancel { get; init; } // Ctrl+C / SIGTERM: ferma il daemon e i suoi processi
     public TimeSpan DaemonHeartbeat { get; init; } = TimeSpan.FromSeconds(10);

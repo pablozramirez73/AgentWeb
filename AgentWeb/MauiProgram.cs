@@ -27,7 +27,8 @@ public static class MauiProgram
         // L'app è un client: agenti, canali e dati vivono sul server AgentWeb.Web (/api, /identity, /hubs).
         var server = new Uri(ServerUrl);
         // Errore rapido se il server non risponde; nessun timeout totale perché il dibattito può durare minuti.
-        static SocketsHttpHandler Handler() => new() { ConnectTimeout = TimeSpan.FromSeconds(10) };
+        // AutomaticDecompression: chiede e decomprime zstd (poi br/gzip) per le risposte dell'API.
+        static SocketsHttpHandler Handler() => new() { ConnectTimeout = TimeSpan.FromSeconds(10), AutomaticDecompression = System.Net.DecompressionMethods.All };
         builder.Services.AddSingleton<ITokenStore, SecureTokenStore>();
         builder.Services.AddSingleton(sp => new RemoteUserSession(
             WithUserAgent(new HttpClient(Handler()) { BaseAddress = server, Timeout = TimeSpan.FromSeconds(30) }), sp.GetRequiredService<ITokenStore>()));

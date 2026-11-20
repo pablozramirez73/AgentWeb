@@ -170,3 +170,25 @@
 .msg:hover .msg-reply, .msg-reply:focus-visible { opacity: 1; }
 @media (hover: none) { .msg-reply { opacity: .6; } }
 .replying { display: flex; align-items: center; justify-content: space-between; gap: .5rem; font-size: .85rem; padding: .25rem .5rem; border-left: 2px solid var(--border); margin-bottom: .25rem; }
+
+.mention-menu {
+    list-style: none;
+    margin: 0 0 .4rem;
+    padding: .25rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+}
+.mention-menu button {
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    padding: .35rem .65rem;
+    border-radius: 8px;
+    font-weight: 560;
+}
+.mention-menu li:first-child button, .mention-menu button:hover, .mention-menu button:focus-visible { background: var(--surface-2); }

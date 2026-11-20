@@ -30,7 +30,9 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
         if (p.Kind == LlmKinds.Daemon) return cache.GetOrAdd(key, _ => new DaemonChatClient(daemons, p.Url.Trim(), m)); // niente tool né limite: decide il daemon
         var gate = perServer.GetOrAdd(p.Kind + "|" + p.Url.Trim().TrimEnd('/'), _ => new SemaphoreSlim(maxPerServer, maxPerServer));
         return cache.GetOrAdd(key, _ => new ThrottledChatClient(Create(p, m), gate)
-            .AsBuilder().UseFunctionInvocation(configure: f => f.AllowConcurrentInvocation = true).Build());
+            .AsBuilder()
+            .UseOpenTelemetry(sourceName: AgentActivity.Name) // span gen_ai e token usati per modello (visibili solo con OpenTelemetry attivo)
+            .UseFunctionInvocation(configure: f => f.AllowConcurrentInvocation = true).Build());
     }
 
     public IChatClient For(LocalAgentConfig agent) => For(agent.Llm);

@@ -173,6 +173,16 @@
                         <button type="button" class="chip-x" aria-label="Annulla la risposta" @onclick="() => replyTo = null">✕</button>
                     </div>
                 }
+                @if (MentionOptions is { Count: > 0 } options)
+                {
+                    @* Dopo "@": gli agenti del canale che si possono menzionare. Tocco, Invio o Tab sceglie (il primo con la tastiera). *@
+                    <ul class="mention-menu" role="listbox" aria-label="Agenti da menzionare">
+                        @foreach (var a in options)
+                        {
+                            <li><button type="button" role="option" @onclick="() => PickMention(a)">@@@a</button></li>
+                        }
+                    </ul>
+                }
                 <form @onsubmit="SendAsync" class="composer">
                     <textarea class="form-control" rows="1" @ref="composer" @bind="draft" @bind:event="oninput" @bind:after="OnDraftChanged" maxlength="4000" aria-label="Messaggio"
                               placeholder="Scrivi a #@current.Name — @@Agente per coinvolgere un agente"></textarea>
@@ -451,7 +461,7 @@
                 if (m.Kind == AuthorKind.Agent) typing.Remove(m.Author); else peopleTyping.Remove(m.Author);
                 await MarkReadAsync();
                 break;
-            case "activity" when e.ChannelId != ChannelId && e.Message is { } m && m.Kind != AuthorKind.System && m.Author != Me:
+            case "message" when e.ChannelId != ChannelId && e.Message is { } m && m.Kind != AuthorKind.System && m.Author != Me:
                 if (ChannelList?.FindIndex(c => c.Id == e.ChannelId) is int i and >= 0)
                 {
                     var mention = Me is not null && m.Text.Contains("@" + Me.Split('@')[0], StringComparison.OrdinalIgnoreCase);
@@ -520,6 +530,20 @@
     Task SetStatusAsync(TaskDto t, WorkStatus s) => Run(() => Ws.SetTaskStatusAsync(t.Id, s));
 
     // "Sta scrivendo": al massimo un avviso ogni 3 s mentre si scrive (un frame minuscolo sull'hub, mai una richiesta HTTP).
+    List<string> MentionOptions => MentionTail().Match(draft) is { Success: true } m
+        ? channelAgents.Agents.Where(a => a.StartsWith(m.Groups[1].Value, StringComparison.OrdinalIgnoreCase)).Take(8).ToList()
+        : [];
+
+    // shortcut: completa la menzione in fondo al testo (dove si scrive di solito), non a metà frase.
+    void PickMention(string agent)
+    {
+        draft = MentionTail().Replace(draft, "@" + agent + " ");
+        _ = composer.FocusAsync();
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<![\p{L}\p{N}_.])@([\p{L}\p{N}_-]*)$")]
+    private static partial System.Text.RegularExpressions.Regex MentionTail();
+
     void OnDraftChanged()
     {
         if (current is null || string.IsNullOrWhiteSpace(draft)) return;

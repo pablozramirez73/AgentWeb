@@ -273,6 +273,7 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
     }
     public Task MarkReadAsync(int channelId, long lastId) => PostAsync<object?>($"api/workspace/channels/{channelId}/read", new MarkReadRequest(lastId));
     public async Task<string> WhoAmIAsync() => (await GetAsync<AccountInfo>("api/account/me")).UserName;
+    public Task<ActivityDto> GetActivityAsync() => GetAsync<ActivityDto>("api/workspace/activity");
     public Task<List<SearchHitDto>> SearchAsync(string query) => GetAsync<List<SearchHitDto>>($"api/workspace/search?q={Uri.EscapeDataString(query)}");
     public Task<List<TaskDto>> GetTasksAsync(int channelId) => GetAsync<List<TaskDto>>($"api/workspace/channels/{channelId}/tasks");
     public Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task) => PostAsync<TaskDto>($"api/workspace/channels/{channelId}/tasks", task);

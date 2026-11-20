@@ -118,7 +118,8 @@ public sealed partial class AgentSettings
     // Solo lettura delle impostazioni precedenti (provider separati): Normalize li porta dentro gli agenti.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<LlmProviderConfig>? Providers { get; set; }
 
-    // Ogni agente deve avere il suo LLM: dal vecchio provider scelto, altrimenti Ollama locale con il modello di default.
+    // Ogni agente deve avere il suo LLM: dal vecchio provider scelto, altrimenti (solo se è ancora Ollama locale) il modello di default.
+    // Un tipo scelto dall'utente non si cambia mai: senza modello resta così e la validazione chiede di sceglierlo.
     public AgentSettings Normalize(string defaultOllamaUrl, string defaultModel)
     {
         foreach (var a in LocalAgents)
@@ -126,9 +127,13 @@ public sealed partial class AgentSettings
             if (string.IsNullOrWhiteSpace(a.Llm.DefaultModel))
             {
                 var legacy = Providers?.FirstOrDefault(p => p.Enabled && (string.IsNullOrWhiteSpace(a.Provider) || p.Name.Equals(a.Provider, StringComparison.OrdinalIgnoreCase)));
-                a.Llm = legacy is null
-                    ? new LlmProviderConfig { Kind = LlmKinds.OllamaLocal, Url = defaultOllamaUrl, DefaultModel = defaultModel }
-                    : new LlmProviderConfig { Kind = legacy.Kind, Url = legacy.Url, ApiKey = legacy.ApiKey, DefaultModel = string.IsNullOrWhiteSpace(a.Model) ? legacy.DefaultModel : a.Model };
+                if (legacy is not null)
+                    a.Llm = new LlmProviderConfig { Kind = legacy.Kind, Url = legacy.Url, ApiKey = legacy.ApiKey, DefaultModel = string.IsNullOrWhiteSpace(a.Model) ? legacy.DefaultModel : a.Model };
+                else if (a.Llm.Kind == LlmKinds.OllamaLocal)
+                {
+                    a.Llm.DefaultModel = string.IsNullOrWhiteSpace(a.Model) ? defaultModel : a.Model;
+                    if (a.Llm.Url is "" or "http://localhost:11434") a.Llm.Url = defaultOllamaUrl;
+                }
             }
             a.Llm.Name = a.Name;
             // Agenti salvati prima dei permessi: tengono ciò che avevano (collaborazione e tutti i server MCP) più lettura e memoria.

@@ -141,15 +141,19 @@
 <button class="btn btn-outline-secondary" @onclick="() => settings.A2AAgents.Add(new())">+ Agente A2A</button>
 
 <hr />
-<div class="d-flex gap-2 align-items-center">
-    <button class="btn btn-primary" disabled="@busy" @onclick="Save">Salva</button>
-    <button class="btn btn-outline-secondary" @onclick="LoadAsync">Annulla modifiche</button>
-    @if (saved) { <span class="text-success" role="status">Salvato.</span> }
+@* Sempre visibile (anche sul telefono, con la pagina lunga): esito del salvataggio ed errori accanto al pulsante. *@
+<div class="save-bar">
+    @if (errors.Count > 0)
+    {
+        <ul class="text-danger mb-2" role="alert">@foreach (var e in errors) { <li>@e</li> }</ul>
+    }
+    <div class="d-flex gap-2 align-items-center">
+        <button class="btn btn-primary" disabled="@busy" @onclick="Save">Salva</button>
+        <button class="btn btn-outline-secondary" @onclick="LoadAsync">Annulla modifiche</button>
+        @if (saved) { <span class="text-success" role="status">Salvato.</span> }
+        else if (errors.Count > 0) { <span class="text-danger">Non salvato.</span> }
+    </div>
 </div>
-@if (errors.Count > 0)
-{
-    <ul class="text-danger mt-2" role="alert">@foreach (var e in errors) { <li>@e</li> }</ul>
-}
 
 @code {
     private AgentSettings settings = new();

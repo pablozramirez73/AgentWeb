@@ -11,7 +11,7 @@ namespace AgentWeb.Web;
 
 // Implementazioni "in processo" per le pagine Blazor renderizzate sul server (prerender e InteractiveServer).
 // Gli eventi passano dallo stesso filtro dell'hub: canale osservato + ChannelVisibility.
-public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus, AuthenticationStateProvider auth) : IWorkspaceClient, IDisposable
+public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus, AuthenticationStateProvider auth, AgentActivity activity) : IWorkspaceClient, IDisposable
 {
     bool started;
     int? watched;
@@ -30,8 +30,7 @@ public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus,
     async Task ForwardAsync(WorkspaceEvent e)
     {
         if (user is null) return;
-        if (e.Kind == "message" && e.ChannelId != watched) e = e with { Kind = "activity" }; // badge dei non letti
-        if (e.Kind is "channel" or "activity" ? await store.CanAccessAsync(e.ChannelId, user) : e.ChannelId == watched)
+        if (e.Kind is "channel" or "message" ? await store.CanAccessAsync(e.ChannelId, user) : e.ChannelId == watched)
             Changed?.Invoke(e);
     }
 
@@ -72,6 +71,7 @@ public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus,
     public async Task MarkReadAsync(int channelId, long lastId) => await store.MarkReadAsync(channelId, await UserAsync(), lastId);
     public async Task<List<SearchHitDto>> SearchAsync(string query) => await store.SearchAsync(await UserAsync(), query);
     public Task<string> WhoAmIAsync() => UserAsync();
+    public async Task<ActivityDto> GetActivityAsync() => await store.GetActivityAsync(await UserAsync(), activity);
     public async Task<List<TaskDto>> GetTasksAsync(int channelId) => await store.GetTasksAsync(channelId, await UserAsync());
     public async Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task) => await store.CreateTaskAsync(channelId, task, await UserAsync());
     public async Task SetTaskStatusAsync(int taskId, WorkStatus status) => await store.SetStatusByUserAsync(taskId, status, await UserAsync());
@@ -146,7 +146,8 @@ public sealed class LocalAgentSettingsService(AgentSettingsStore store, Authenti
 
 // Hub del workspace (browser WebAssembly e app MAUI). Gruppi:
 //   "u:{utente}"  -> eventi "channel" dei canali privati di cui è membro
-//   "ch:{id}"     -> messaggi/task/typing del canale, solo dopo Watch con ChannelVisibility
+//   "ch:{id}"     -> task/typing/agenti del canale, solo dopo Watch con ChannelVisibility
+// I messaggi vanno a tutti quelli che vedono il canale (anche senza guardarlo: badge dei non letti), una volta sola.
 [Authorize]
 public sealed class WorkspaceHub(WorkspaceStore store, SessionConnections connections) : Hub
 {
@@ -210,32 +211,42 @@ public sealed class WorkspaceHub(WorkspaceStore store, SessionConnections connec
 }
 
 // Inoltra gli eventi del workspace ai client SignalR, rispettando la visibilità (con Redis anche alle altre repliche).
-public sealed class WorkspaceHubBridge(WorkspaceBus bus, IHubContext<WorkspaceHub> hub, WorkspaceStore store, ILogger<WorkspaceHubBridge> log) : IHostedService
+// Un solo consumatore: gli eventi escono nell'ordine in cui sono stati pubblicati, anche se l'instradamento interroga il database.
+public sealed class WorkspaceHubBridge(WorkspaceBus bus, IHubContext<WorkspaceHub> hub, WorkspaceStore store, ILogger<WorkspaceHubBridge> log) : BackgroundService
 {
-    void Send(WorkspaceEvent e) => _ = SendAsync(e);
+    readonly System.Threading.Channels.Channel<WorkspaceEvent> queue = System.Threading.Channels.Channel.CreateUnbounded<WorkspaceEvent>(new() { SingleReader = true });
+
+    void Enqueue(WorkspaceEvent e) => queue.Writer.TryWrite(e);
+
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        bus.Published += Enqueue;
+        try
+        {
+            await foreach (var e in queue.Reader.ReadAllAsync(ct))
+            {
+                try { await SendAsync(e); }
+                catch (Exception ex) { log.LogWarning(ex, "Evento {Kind} non inoltrato", e.Kind); }
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally { bus.Published -= Enqueue; }
+    }
 
     async Task SendAsync(WorkspaceEvent e)
     {
-        try
+        if (e.Kind is not ("channel" or "message"))
         {
-            if (e.Kind != "channel")
-                await hub.Clients.Group(WorkspaceHub.ChannelGroup(e.ChannelId)).SendAsync("event", e);
-            // Un nuovo messaggio arriva come "activity" anche a chi vede il canale senza guardarlo (badge dei non letti),
-            // con lo stesso instradamento degli eventi "channel": solo chi può vederlo.
-            // shortcut: chi guarda il canale riceve sia "message" sia "activity" (la pagina ignora il secondo); escluderlo
-            // richiederebbe l'elenco delle connessioni che guardano ogni canale, su tutte le repliche.
-            if (e.Kind is "channel" or "message")
-            {
-                var routed = e.Kind == "message" ? e with { Kind = "activity" } : e;
-                if (await store.PrivateMembersAsync(e.ChannelId) is { } members)
-                    await hub.Clients.Groups(members.Select(WorkspaceHub.UserGroup).ToList()).SendAsync("event", routed);
-                else
-                    await hub.Clients.All.SendAsync("event", routed); // canale pubblico: lo vedono tutti gli autenticati
-            }
+            await hub.Clients.Group(WorkspaceHub.ChannelGroup(e.ChannelId)).SendAsync("event", e);
+            return;
         }
-        catch (Exception ex) { log.LogWarning(ex, "Evento {Kind} non inoltrato", e.Kind); }
+        // Solo chi può vedere il canale: i membri se privato, tutti gli autenticati se pubblico.
+        var to = await store.PrivateMembersAsync(e.ChannelId) is { } members
+            ? hub.Clients.Groups(members.Select(WorkspaceHub.UserGroup).ToList())
+            : hub.Clients.All;
+        await to.SendAsync("event", e);
+        // shortcut: copia "activity" per le app MAUI già installate, che leggono i badge dei non letti solo da lì
+        // (i client nuovi la ignorano). Da togliere quando quelle versioni non sono più in uso.
+        if (e.Kind == "message") await to.SendAsync("event", e with { Kind = "activity" });
     }
-
-    public Task StartAsync(CancellationToken ct) { bus.Published += Send; return Task.CompletedTask; }
-    public Task StopAsync(CancellationToken ct) { bus.Published -= Send; return Task.CompletedTask; }
 }

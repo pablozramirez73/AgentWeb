@@ -9,8 +9,29 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// OpenTelemetry (tracce → Tempo, metriche → Prometheus, log → Loki, tutto su Grafana) via OTLP verso un collector:
+// attivo solo se è configurato OTEL_EXPORTER_OTLP_ENDPOINT (es. http://localhost:4318 con docker-compose.observability.yml).
+if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(r => r.AddService(builder.Configuration["OTEL_SERVICE_NAME"] ?? "agentweb"))
+        .WithTracing(t => t
+            .AddSource(AgentWeb.Web.AgentActivity.Name, "Npgsql")
+            .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/healthz"))
+            .AddHttpClientInstrumentation())
+        .WithMetrics(m => m
+            .AddMeter(AgentWeb.Web.AgentActivity.Name, "Npgsql")
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation())
+        .WithLogging()
+        .UseOtlpExporter();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
@@ -66,8 +87,9 @@ builder.Services.AddRateLimiter(o =>
 });
 
 // Agenti: ogni agente usa il provider LLM scelto nelle Impostazioni (Ollama locale/remoto/Cloud, OpenAI-compatibile, Anthropic).
-builder.Services.AddOpenApi(); // descrizione delle API in /openapi/v1.json (per SDK e client generati)
+builder.Services.AddOpenApi(OpenApiSecurity.Configure); // /openapi/v1.json (OpenAPI 3.2, default di .NET 11) per SDK e client generati
 builder.Services.AddSingleton<DaemonBroker>();   // lavoro degli agenti "daemon" verso i computer degli utenti
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DaemonBroker>()); // scadenza dei lease
 builder.Services.AddSingleton<AgentSettingsStore>();
 builder.Services.AddSingleton<LlmClients>();
 builder.Services.AddSingleton<MemoryStore>();   // memoria semantica (pgvector + embedding locale)
@@ -79,6 +101,7 @@ builder.Services.AddScoped<IChatClient>(sp => new DebateChatClient(sp.GetRequire
 // Workspace: canali, messaggi, task, eventi in tempo reale e worker degli agenti.
 builder.Services.AddSingleton<WorkspaceBus>();
 builder.Services.AddSingleton<AgentQueue>();
+builder.Services.AddSingleton<AgentActivity>();
 builder.Services.AddSingleton<WorkspaceStore>();
 builder.Services.AddSingleton<AgentRuntime>();
 builder.Services.AddHostedService<AgentWorker>();
@@ -88,7 +111,12 @@ builder.Services.AddScoped<IUserSession, LocalUserSession>();
 builder.Services.AddScoped<IAccountClient, LocalAccountClient>();
 builder.Services.AddScoped<IAgentSettingsService, LocalAgentSettingsService>();
 
+// Compressione delle risposte: zstd (RFC 8878) per chi lo accetta, poi Brotli e Gzip (default di ASP.NET Core 11).
+// Niente su HTTPS (EnableForHttps resta false): con cookie e token nelle pagine si apre BREACH.
+builder.Services.AddResponseCompression();
+
 var app = builder.Build();
+app.UseResponseCompression();
 
 // Schema dalle migrazioni EF (Migrations/); i DB creati con il vecchio EnsureCreated vengono agganciati al baseline.
 using (var scope = app.Services.CreateScope())

@@ -74,6 +74,7 @@ public static class AgentApi
             return Results.NoContent();
         });
         ws.MapGet("/search", (string q, WorkspaceStore s, ClaimsPrincipal u) => s.SearchAsync(User(u), q));
+        ws.MapGet("/activity", (WorkspaceStore s, AgentActivity a, ClaimsPrincipal u) => s.GetActivityAsync(User(u), a));
         ws.MapGet("/channels/{id:int}/tasks", (int id, WorkspaceStore s, ClaimsPrincipal u) => s.GetTasksAsync(id, User(u)));
         ws.MapPost("/channels/{id:int}/tasks", (int id, NewTaskRequest t, WorkspaceStore s, ClaimsPrincipal u) => s.CreateTaskAsync(id, t, User(u)));
         ws.MapPost("/tasks/{id:int}/status", async (int id, StatusBody b, WorkspaceStore s, ClaimsPrincipal u) =>

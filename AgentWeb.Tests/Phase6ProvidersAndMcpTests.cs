@@ -110,6 +110,21 @@ public sealed class Phase6ProviderTests
         Assert.Contains(errors, e => e.Contains("\"B\"") && e.Contains("modello"));
     }
 
+    // Il tipo scelto non torna mai "Ollama locale" da solo: neppure per un agente disabilitato salvato senza modello.
+    [Fact]
+    public void ChosenKind_SurvivesReload_EvenWithoutAModel()
+    {
+        var json = """
+            {"LocalAgents":[{"Name":"A","Prompt":"p","Enabled":false,"Llm":{"Kind":"anthropic","Url":"https://api.anthropic.com","ApiKey":"k","DefaultModel":""}},
+                            {"Name":"B","Prompt":"p","Llm":{"Kind":"openai","Url":"https://api.openai.com/v1","DefaultModel":"gpt-5-mini"}},
+                            {"Name":"C","Prompt":"p"}]}
+            """;
+        var s = JsonSerializer.Deserialize<AgentSettings>(json)!.Normalize("http://ollama:11434", "default");
+        Assert.Equal((LlmKinds.Anthropic, "k", ""), (s.LocalAgents[0].Llm.Kind, s.LocalAgents[0].Llm.ApiKey, s.LocalAgents[0].Llm.DefaultModel));
+        Assert.Equal((LlmKinds.OpenAI, "gpt-5-mini"), (s.LocalAgents[1].Llm.Kind, s.LocalAgents[1].Llm.DefaultModel));
+        Assert.Equal((LlmKinds.OllamaLocal, "http://ollama:11434", "default"), (s.LocalAgents[2].Llm.Kind, s.LocalAgents[2].Llm.Url, s.LocalAgents[2].Llm.DefaultModel));
+    }
+
     [Fact]
     public void OldSettings_WithSeparateProviders_AreConvertedIntoTheAgents()
     {

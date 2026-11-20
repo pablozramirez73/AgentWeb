@@ -1,0 +1,20 @@
+# Osservabilità locale: collector OpenTelemetry + Prometheus (metriche) + Loki (log) + Tempo (tracce) + Grafana, in un'immagine.
+#   docker compose -f docker-compose.observability.yml up -d
+#   poi avvia AgentWeb con:  OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+#   Grafana: http://localhost:3000 (admin / admin al primo accesso) → Explore: Prometheus, Loki, Tempo, Pyroscope.
+#   Profiling (solo immagine Docker Linux, non su macOS): docker run -e CORECLR_ENABLE_PROFILING=1 -e PYROSCOPE_PROFILING_ENABLED=1
+#     -e PYROSCOPE_SERVER_ADDRESS=http://host.docker.internal:4040 ... → Grafana → Drilldown → Profiles, servizio "agentweb".
+# Metriche di AgentWeb: agentweb_agent_runs_total, agentweb_agent_duration_seconds, agentweb_agent_running,
+# gen_ai_client_token_usage (token per modello), http_server_request_duration_seconds, più runtime .NET e Npgsql.
+services:
+  lgtm:
+    image: grafana/otel-lgtm:0.11.0
+    ports:
+      - "3000:3000"   # Grafana
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "4040:4040"   # Pyroscope (profili dal container: vedi Dockerfile)
+    volumes:
+      - lgtm-data:/data
+volumes:
+  lgtm-data:

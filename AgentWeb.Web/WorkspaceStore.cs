@@ -70,6 +70,20 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     }
 
     // Ricerca full-text su tutti i canali visibili (stessa regola di ChannelVisibility), i più recenti per primi.
+    // Attività visibile all'utente: lavori degli agenti e task aperti dei soli canali che vede (ChannelVisibility).
+    public async Task<ActivityDto> GetActivityAsync(string user, AgentActivity activity)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        var channels = await ChannelVisibility.Visible(db, user).ToDictionaryAsync(c => c.Id, c => c.Name);
+        var ids = channels.Keys.ToList();
+        var open = await db.Tasks.Where(t => ids.Contains(t.ChannelId) && (t.Status == WorkStatus.Todo || t.Status == WorkStatus.InProgress))
+            .OrderByDescending(t => t.UpdatedAt).Take(50).ToListAsync();
+        var (running, recent) = activity.Snapshot();
+        List<AgentRunDto> Visible(IEnumerable<AgentActivity.Run> runs) => runs.Where(r => channels.ContainsKey(r.ChannelId))
+            .Select(r => new AgentRunDto(r.Agent, r.ChannelId, channels[r.ChannelId], r.Kind, r.StartedAt, r.Seconds, r.Error)).ToList();
+        return new(Visible(running), Visible(recent).Take(30).ToList(), open.Select(ToDto).ToList());
+    }
+
     public async Task<List<SearchHitDto>> SearchAsync(string user, string query, int take = 50)
     {
         query = Required(query, 200, "Ricerca");

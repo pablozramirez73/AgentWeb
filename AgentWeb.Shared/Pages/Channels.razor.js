@@ -10,6 +10,12 @@ export function enterToSend(textarea) {
 
     textarea.addEventListener("input", grow);
     textarea.addEventListener("keydown", e => {
+        // Menu delle menzioni aperto: Invio o Tab sceglie il primo agente invece di inviare.
+        const menu = textarea.form?.previousElementSibling;
+        if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !e.isComposing && menu?.classList.contains("mention-menu")) {
+            const first = menu.querySelector("button");
+            if (first) { e.preventDefault(); first.click(); return; }
+        }
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
             if (textarea.value.trim().length > 0) textarea.form?.requestSubmit();
