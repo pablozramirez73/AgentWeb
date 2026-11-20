@@ -39,7 +39,9 @@ public static class A2AExposure
 
     public static void MapA2AExposure(this WebApplication app)
     {
-        app.MapA2A(app.Services.GetRequiredService<A2AServer>(), "/a2a/{agent}").RequireAuthorization("mcp");
+        var server = app.Services.GetRequiredService<A2AServer>();
+        app.MapA2A(server, "/a2a/{agent}").RequireAuthorization("mcp");                 // binding JSONRPC
+        app.MapHttpA2A(server, "/a2a/{agent}/rest").RequireAuthorization("mcp");        // binding HTTP+JSON (POST .../message:send, GET .../tasks/{id}, ...)
 
         app.MapGet("/a2a/{agent}/.well-known/agent-card.json", (string agent, AgentSettingsStore store, HttpContext http) =>
         {
@@ -50,7 +52,11 @@ public static class A2AExposure
                 Name = a.Name,
                 Description = a.Prompt,
                 Version = "1.0.0",
-                SupportedInterfaces = [new AgentInterface { Url = url, ProtocolBinding = "JSONRPC", ProtocolVersion = "1.0" }],
+                SupportedInterfaces = // in ordine di preferenza
+                [
+                    new AgentInterface { Url = url, ProtocolBinding = "JSONRPC", ProtocolVersion = "1.0" },
+                    new AgentInterface { Url = url + "/rest", ProtocolBinding = "HTTP+JSON", ProtocolVersion = "1.0" },
+                ],
                 DefaultInputModes = ["text/plain"],
                 DefaultOutputModes = ["text/plain"],
                 Capabilities = new AgentCapabilities { Streaming = false },

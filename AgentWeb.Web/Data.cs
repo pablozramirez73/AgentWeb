@@ -5,7 +5,30 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AgentWeb.Web;
 
-public sealed class AppUser : IdentityUser;
+public sealed class AppUser : IdentityUser
+{
+    public string? DisplayName { get; set; } // nome mostrato al posto dell'email; l'email (UserName) resta l'identità
+    public byte[]? Avatar { get; set; }      // foto profilo, max 256 KB (PNG, JPEG o WebP: controllati i byte, non solo il tipo)
+    public string? AvatarType { get; set; }
+    // Notifiche push: quali eventi avvisano l'utente sui suoi dispositivi (vedi PushNotifier).
+    public bool NotifyMentions { get; set; } = true;
+    public bool NotifyPrivate { get; set; } = true;
+    public bool NotifyTasks { get; set; } = true;
+}
+
+// Un dispositivo che riceve notifiche push. Kind: "web" (Web Push, Token = endpoint del browser), "apns" (iPhone), "pushy" (Android).
+// Sid: la sessione che l'ha registrato; revocarla cancella anche il dispositivo (niente notifiche a un telefono perso).
+public sealed class PushDeviceEntity
+{
+    public long Id { get; set; }
+    public string UserName { get; set; } = "";
+    public string? Sid { get; set; }
+    public string Kind { get; set; } = "";
+    public string Token { get; set; } = "";
+    public string? P256dh { get; set; }
+    public string? Auth { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
 
 public sealed class ChannelEntity
 {
@@ -134,10 +157,21 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
     public DbSet<ReadCursorEntity> ReadCursors => Set<ReadCursorEntity>();
     public DbSet<DaemonDeliveryEntity> DaemonDeliveries => Set<DaemonDeliveryEntity>();
     public DbSet<DaemonMachineEntity> DaemonMachines => Set<DaemonMachineEntity>();
+    public DbSet<PushDeviceEntity> PushDevices => Set<PushDeviceEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
+        b.Entity<AppUser>().Property(u => u.DisplayName).HasMaxLength(60);
+        b.Entity<AppUser>().Property(u => u.AvatarType).HasMaxLength(20);
+        b.Entity<AppUser>().Property(u => u.NotifyMentions).HasDefaultValue(true);
+        b.Entity<AppUser>().Property(u => u.NotifyPrivate).HasDefaultValue(true);
+        b.Entity<AppUser>().Property(u => u.NotifyTasks).HasDefaultValue(true);
+        b.Entity<PushDeviceEntity>().HasIndex(d => d.Token).IsUnique();
+        b.Entity<PushDeviceEntity>().HasIndex(d => d.UserName);
+        b.Entity<PushDeviceEntity>().HasIndex(d => d.Sid);
+        b.Entity<PushDeviceEntity>().Property(d => d.Kind).HasMaxLength(10);
+        b.Entity<PushDeviceEntity>().Property(d => d.Token).HasMaxLength(1000);
         b.Entity<ChannelEntity>().HasIndex(c => c.Name).IsUnique();
         b.Entity<MessageEntity>().HasIndex(m => m.ChannelId);
         b.Entity<MessageEntity>().HasIndex(m => new { m.ChannelId, m.Author, m.ClientId }).IsUnique().HasFilter("\"ClientId\" IS NOT NULL");

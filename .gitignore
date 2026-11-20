@@ -12,3 +12,6 @@ obj/
 agentweb.db*
 agentsettings.json
 *.swp
+
+# Chiavi VAPID generate al primo avvio (private)
+vapid-keys.json

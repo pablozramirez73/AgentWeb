@@ -127,6 +127,57 @@ public sealed class RemoteAccountClient(HttpClient http) : IAccountClient
 {
     public Uri ServerBase => http.BaseAddress!;
 
+    public async Task<ProfileDto> GetProfileAsync()
+    {
+        using var r = await http.GetAsync("api/account/profile");
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+        return (await r.Content.ReadFromJsonAsync<ProfileDto>())!;
+    }
+
+    public async Task SaveProfileAsync(string? displayName)
+    {
+        using var r = await http.PutAsJsonAsync("api/account/profile", new ProfileRequest(displayName));
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
+
+    public async Task SetAvatarAsync(string? contentType, byte[]? data)
+    {
+        using var r = data is null ? await http.DeleteAsync("api/account/avatar")
+            : await http.PutAsJsonAsync("api/account/avatar", new AvatarRequest(contentType ?? "", Convert.ToBase64String(data)));
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
+
+    public async Task SendConfirmationEmailAsync()
+    {
+        using var r = await http.PostAsync("api/account/email/confirm", null);
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
+
+    public async Task RemoveLoginAsync(string provider)
+    {
+        using var r = await http.DeleteAsync($"api/account/logins/{Uri.EscapeDataString(provider)}");
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
+
+    public async Task<NotificationSettingsDto> GetNotificationSettingsAsync() =>
+        (await http.GetFromJsonAsync<NotificationSettingsDto>("api/account/notifications"))!;
+    public Task SaveNotificationSettingsAsync(NotificationSettingsDto settings) => SendAsync(HttpMethod.Put, "api/account/notifications", settings);
+    public async Task<PushConfigDto> GetPushConfigAsync() => (await http.GetFromJsonAsync<PushConfigDto>("api/push/config"))!;
+    public Task RegisterPushDeviceAsync(PushDeviceRequest device) => SendAsync(HttpMethod.Post, "api/push/devices", device);
+    public Task UnregisterPushDeviceAsync(string token) => SendAsync(HttpMethod.Post, "api/push/devices/remove", new PushTokenRequest(token));
+    public async Task<int> SendTestPushAsync()
+    {
+        using var r = await http.PostAsync("api/push/test", null);
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+        return await r.Content.ReadFromJsonAsync<int>();
+    }
+
+    async Task SendAsync(HttpMethod method, string url, object body)
+    {
+        using var r = await http.SendAsync(new(method, url) { Content = JsonContent.Create(body) });
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
+
     public async Task<List<SessionDto>> GetSessionsAsync()
     {
         using var r = await http.GetAsync("api/account/sessions");

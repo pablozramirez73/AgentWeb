@@ -71,5 +71,8 @@
   <ItemGroup>
     <AssemblyMetadata Include="AgentWebServer" Value="$(AgentWebServer)" />
   </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-android'">
+    <PackageReference Include="Pushy.SDK.MAUI.Android" Version="1.0.127" />
+  </ItemGroup>
 
 </Project>

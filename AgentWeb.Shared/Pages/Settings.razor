@@ -4,8 +4,8 @@
 
 <PageTitle>Agenti · AgentWeb</PageTitle>
 
+<SettingsShell Title="Agenti">
 <div class="page-header">
-    <h3>Agenti</h3>
 <p>Gli agenti sono i membri AI dei canali: rispondono alle @@menzioni, svolgono i task e collaborano tra loro (chi coordina un task può chiedere aiuto agli altri). Ognuno ha il suo LLM. Solo gli amministratori possono modificarli; le modifiche valgono dopo il salvataggio.</p>
 </div>
 
@@ -154,6 +154,7 @@
         else if (errors.Count > 0) { <span class="text-danger">Non salvato.</span> }
     </div>
 </div>
+</SettingsShell>
 
 @code {
     private AgentSettings settings = new();

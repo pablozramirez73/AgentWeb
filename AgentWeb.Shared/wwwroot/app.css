@@ -56,8 +56,9 @@
     --maui-status-bar-safe-area-background: var(--surface);
 }
 
+/* Tema: segue il sistema; Impostazioni → Aspetto può forzarlo (data-theme sull'html, salvato nel dispositivo). */
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme=light]) {
         --bg: #0c0c0d;
         --surface: #141415;
         --surface-2: #1b1b1d;
@@ -79,6 +80,29 @@
         --bs-danger-rgb: 242, 134, 125;
     }
 }
+:root[data-theme=dark] {
+    color-scheme: dark;
+    --bg: #0c0c0d;
+    --surface: #141415;
+    --surface-2: #1b1b1d;
+    --surface-3: #242427;
+    --border: #262628;
+    --border-strong: #35353a;
+    --text: #f2f2f0;
+    --text-2: #cfcfca;
+    --muted: #8e8e88;
+    --ink: #f2f2f0;
+    --ink-contrast: #0c0c0d;
+    --danger: #f2867d;
+    --success: #7cc48d;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+    --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 12px 32px -16px rgb(0 0 0 / .7);
+    --bs-link-color-rgb: 242, 242, 240;
+    --bs-link-hover-color-rgb: 242, 242, 240;
+    --bs-success-rgb: 124, 196, 141;
+    --bs-danger-rgb: 242, 134, 125;
+}
+:root[data-theme=light] { color-scheme: light; }
 
 /* ---------- Base ---------- */
 html, body {
@@ -173,8 +197,9 @@ hr { border-color: var(--border); opacity: 1; }
 .form-check-input:checked { background-color: var(--ink); border-color: var(--ink); }
 .form-check-input:focus { box-shadow: 0 0 0 4px var(--focus); border-color: var(--ink); }
 @media (prefers-color-scheme: dark) {
-    .form-check-input:checked[type=checkbox] { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%230c0c0d' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e"); }
+    :root:not([data-theme=light]) .form-check-input:checked[type=checkbox] { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%230c0c0d' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e"); }
 }
+:root[data-theme=dark] .form-check-input:checked[type=checkbox] { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%230c0c0d' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e"); }
 .input-group > .btn { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .input-group > .form-control, .input-group > .form-select { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .valid.modified:not([type=checkbox]) { outline: 1px solid var(--success); }

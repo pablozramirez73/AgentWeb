@@ -90,7 +90,11 @@ public sealed class SessionStore(IDbContextFactory<AppDb> dbf, SessionConnection
         await using var db = await dbf.CreateDbContextAsync();
         var n = await db.UserSessions.Where(s => s.Id == sid && s.RevokedAt == null && (userName == null || s.UserName == userName))
             .ExecuteUpdateAsync(u => u.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
-        connections.Abort(sid);
+        if (n > 0)
+        {
+            connections.Abort(sid); // mai chiudere le connessioni di una sessione altrui
+            await db.PushDevices.Where(d => d.Sid == sid).ExecuteDeleteAsync(); // niente più notifiche sul dispositivo revocato
+        }
         return n > 0;
     }
 
@@ -101,6 +105,7 @@ public sealed class SessionStore(IDbContextFactory<AppDb> dbf, SessionConnection
         var ids = await db.UserSessions.Where(s => s.UserName == userName && s.RevokedAt == null && s.Id != except && (!logins || s.Kind != "token"))
             .Select(s => s.Id).ToListAsync();
         await db.UserSessions.Where(s => ids.Contains(s.Id)).ExecuteUpdateAsync(u => u.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
+        await db.PushDevices.Where(d => d.Sid != null && ids.Contains(d.Sid)).ExecuteDeleteAsync();
         foreach (var id in ids) connections.Abort(id);
         return ids.Count;
     }
@@ -165,20 +170,32 @@ public sealed class ApiTokenAuthenticationHandler(IOptionsMonitor<Authentication
 // Connessioni SignalR aperte per sessione: la revoca le chiude subito invece di aspettare la prossima richiesta.
 public sealed class SessionConnections
 {
-    readonly ConcurrentDictionary<string, ConcurrentDictionary<string, HubCallerContext>> bySession = new();
+    // Un lock solo: rimuovere la sessione vuota senza che un Add concorrente finisca in un insieme già scartato (e sfugga alla revoca).
+    readonly Dictionary<string, Dictionary<string, HubCallerContext>> bySession = new();
+    readonly Lock gate = new();
 
-    public void Add(string sid, HubCallerContext ctx) => bySession.GetOrAdd(sid, _ => new())[ctx.ConnectionId] = ctx;
+    public void Add(string sid, HubCallerContext ctx)
+    {
+        lock (gate)
+        {
+            if (!bySession.TryGetValue(sid, out var set)) bySession[sid] = set = new();
+            set[ctx.ConnectionId] = ctx;
+        }
+    }
 
     public void Remove(string sid, string connectionId)
     {
-        if (bySession.TryGetValue(sid, out var set)) set.TryRemove(connectionId, out _);
+        lock (gate)
+            if (bySession.TryGetValue(sid, out var set) && set.Remove(connectionId) && set.Count == 0) bySession.Remove(sid);
     }
 
     // shortcut: solo le connessioni di questa replica; con più repliche le altre si chiudono alla riconnessione (negotiate -> 401).
     public void Abort(string sid)
     {
-        if (bySession.TryRemove(sid, out var set))
-            foreach (var ctx in set.Values) ctx.Abort();
+        Dictionary<string, HubCallerContext>? set;
+        lock (gate)
+            if (!bySession.Remove(sid, out set)) return;
+        foreach (var ctx in set.Values) ctx.Abort();
     }
 }
 

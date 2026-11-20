@@ -1,0 +1,109 @@
+@page "/notifications"
+@rendermode InteractiveServer
+@inject IAccountClient Accounts
+@inject AgentWeb.Shared.Services.IDevicePush Device
+
+<PageTitle>Notifiche · AgentWeb</PageTitle>
+
+<SettingsShell Title="Notifiche">
+    @if (notice is { } n) { <div class="alert @(n.Ok ? "alert-success" : "alert-danger") py-2" role="status">@n.Text</div> }
+
+    <h3 class="section-label">Questo dispositivo</h3>
+    <div class="card-block card-row">
+        <div>
+            <h4>Notifiche push</h4>
+            <p class="text-muted mb-0">@Status</p>
+        </div>
+        @if (available && device is null) { <button class="btn btn-primary" disabled="@busy" @onclick="EnableAsync">Attiva</button> }
+        else if (device is not null)
+        {
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" disabled="@busy" @onclick="TestAsync">Invia una prova</button>
+                <button class="btn btn-outline-danger" disabled="@busy" @onclick="DisableAsync">Disattiva</button>
+            </div>
+        }
+    </div>
+
+    <h3 class="section-label">Avvisami quando</h3>
+    <div class="card-block d-flex flex-column gap-3">
+        @if (settings is null) { <p class="text-muted m-0">Caricamento…</p> }
+        else
+        {
+            <Toggle Label="Qualcuno mi menziona" Hint="@("Un messaggio con @" + "tuo-nome in un canale che vedi.")" Value="settings.Mentions" Changed="v => SaveAsync(settings with { Mentions = v })" />
+            <Toggle Label="Arriva un messaggio in un canale privato" Hint="Nei canali privati di cui fai parte, anche dagli agenti." Value="settings.Private" Changed="v => SaveAsync(settings with { Private = v })" />
+            <Toggle Label="Mi assegnano un task" Hint="Quando un'altra persona ti assegna un task." Value="settings.Tasks" Changed="v => SaveAsync(settings with { Tasks = v })" />
+        }
+    </div>
+    <p class="text-muted small">Valgono per tutti i tuoi dispositivi. Se AgentWeb è aperto in primo piano nel browser, il messaggio lo vedi lì e la notifica non arriva.</p>
+</SettingsShell>
+
+@code {
+    NotificationSettingsDto? settings;
+    PushConfigDto? config;
+    PushDeviceRequest? device;
+    bool available, checkedDevice, busy;
+    (bool Ok, string Text)? notice;
+
+    string Status => !checkedDevice ? "Controllo…"
+        : device is not null ? "Attive su questo dispositivo."
+        : available ? "Non attive su questo dispositivo."
+        : Device.Kind == "web" ? "Questo browser non supporta le notifiche push. Su iPhone e iPad: prima \"Aggiungi alla schermata Home\", poi apri AgentWeb da lì."
+        : "Il server non ha ancora attivato le notifiche per questo tipo di dispositivo.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { settings = await Accounts.GetNotificationSettingsAsync(); config = await Accounts.GetPushConfigAsync(); }
+        catch (Exception ex) { notice = (false, ex.GetBaseException().Message); }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            available = config is not null && config.Kinds.Contains(Device.Kind) && await Device.SupportedAsync();
+            if (available && await Device.CurrentAsync() is { } d)
+            {
+                await Accounts.RegisterPushDeviceAsync(d); // il server potrebbe averlo dimenticato (sessione revocata): si riallinea
+                device = d;
+            }
+        }
+        catch (Exception ex) { notice = (false, ex.GetBaseException().Message); }
+        checkedDevice = true;
+        StateHasChanged();
+    }
+
+    Task EnableAsync() => Act(async () =>
+    {
+        var d = await Device.SubscribeAsync(config!);
+        if (d is null) { notice = (false, "Permesso negato: abilita le notifiche per AgentWeb nelle impostazioni del browser o del telefono."); return; }
+        await Accounts.RegisterPushDeviceAsync(d);
+        device = d;
+        notice = (true, "Notifiche attivate su questo dispositivo.");
+    });
+
+    Task DisableAsync() => Act(async () =>
+    {
+        var token = device!.Token;
+        await Device.UnsubscribeAsync();
+        await Accounts.UnregisterPushDeviceAsync(token);
+        device = null;
+        notice = (true, "Notifiche disattivate su questo dispositivo.");
+    });
+
+    Task TestAsync() => Act(async () =>
+    {
+        var n = await Accounts.SendTestPushAsync();
+        notice = n > 0 ? (true, $"Notifica di prova inviata a {n} dispositiv{(n == 1 ? "o" : "i")}.") : (false, "Nessun dispositivo l'ha accettata: prova a disattivare e riattivare.");
+    });
+
+    Task SaveAsync(NotificationSettingsDto s) => Act(async () => { await Accounts.SaveNotificationSettingsAsync(s); settings = s; });
+
+    async Task Act(Func<Task> action)
+    {
+        busy = true; notice = null;
+        try { await action(); }
+        catch (Exception ex) { notice = (false, ex.GetBaseException().Message); }
+        busy = false;
+    }
+}

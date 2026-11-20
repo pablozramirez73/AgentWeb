@@ -9,15 +9,20 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     readonly string path = config["AgentSettings:Path"] ?? Path.Combine(env.ContentRootPath, "agentsettings.json");
     readonly Lock gate = new();
+    string? cached; // testo del file: rileggerlo a ogni job serializzava gli agenti in parallelo sul lock
+
+    // shortcut: modifiche fatte a mano al file mentre il server gira non si vedono fino al riavvio (o al prossimo Save).
+    string? Text()
+    {
+        lock (gate) return cached ??= File.Exists(path) ? File.ReadAllText(path) : null;
+    }
 
     public bool AllowStdio => env.IsDevelopment(); // stdio esegue comandi sul server: mai esporlo fuori da Development
 
     // Restituisce sempre una copia: le modifiche nella UI non toccano la config attiva finché non si salva.
     public AgentSettings Get()
     {
-        AgentSettings s;
-        lock (gate)
-            s = File.Exists(path) ? JsonSerializer.Deserialize<AgentSettings>(File.ReadAllText(path)) ?? new() : new();
+        var s = Text() is { } text ? JsonSerializer.Deserialize<AgentSettings>(text) ?? new() : new(); // copia nuova a ogni chiamata
         // Ogni agente ha il suo LLM; le impostazioni precedenti (provider separati o solo Ollama) vengono convertite.
         s.Normalize(config["Ollama:Url"] ?? "http://localhost:11434", config["Ollama:Model"] ?? "gemma4:e4b-mlx");
         return s;
@@ -30,8 +35,10 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
         lock (gate)
         {
             var tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(settings, Json));
+            var text = JsonSerializer.Serialize(settings, Json);
+            File.WriteAllText(tmp, text);
             File.Move(tmp, path, overwrite: true); // scrittura atomica: niente file troncato se il processo cade
+            cached = text;
         }
         icons.For(settings.LocalAgents.Where(a => a.Enabled)); // agenti nuovi: l'icona si disegna subito, in background
     }

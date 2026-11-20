@@ -14,6 +14,7 @@ builder.Services.AddScoped(sp => new HttpClient(new SessionExpiredHandler(sp.Get
 builder.Services.AddScoped<IChatClient>(sp => new AGUI.Client.AGUIChatClient(new(sp.GetRequiredService<HttpClient>(), "api/chat")));
 builder.Services.AddScoped<IWorkspaceClient>(sp => new RemoteWorkspaceClient(sp.GetRequiredService<HttpClient>()));
 builder.Services.AddScoped<IAccountClient>(sp => new RemoteAccountClient(sp.GetRequiredService<HttpClient>()));
+builder.Services.AddScoped<AgentWeb.Shared.Services.IDevicePush, AgentWeb.Shared.Services.BrowserPush>();
 
 await builder.Build().RunAsync();
 

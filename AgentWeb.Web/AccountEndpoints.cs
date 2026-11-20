@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
@@ -18,10 +19,11 @@ public static class AccountEndpoints
 
     public static void MapAccountEndpoints(this WebApplication app)
     {
-        app.MapGet("/login", async (HttpContext http, IAntiforgery antiforgery, UserManager<AppUser> users, string? error) =>
+        app.MapGet("/login", async (HttpContext http, IAntiforgery antiforgery, UserManager<AppUser> users, IAuthenticationSchemeProvider schemes, string? error) =>
         {
             var token = antiforgery.GetAndStoreTokens(http);
-            return Results.Content(LoginPage(token.FormFieldName, token.RequestToken!, error, bootstrap: !await users.Users.AnyAsync()), "text/html; charset=utf-8");
+            var providers = (await schemes.GetAllSchemesAsync()).Select(s => s.Name).Where(ExternalProviders.Names.Contains).ToList();
+            return Results.Content(LoginPage(token.FormFieldName, token.RequestToken!, error, bootstrap: !await users.Users.AnyAsync(), providers), "text/html; charset=utf-8");
         }).AllowAnonymous();
 
         // L'app chiede se mostrare "Registrati": vero solo finché non esiste nessun account.
@@ -80,7 +82,7 @@ public static class AccountEndpoints
 
     const string ClosedMessage = "Registrazione chiusa: chiedi un account a un amministratore.";
 
-    static async Task SignInWebAsync(AppUser user, SignInManager<AppUser> signIn, SessionStore sessions, HttpContext http)
+    internal static async Task SignInWebAsync(AppUser user, SignInManager<AppUser> signIn, SessionStore sessions, HttpContext http)
     {
         var sid = await sessions.CreateAsync(user.UserName!, "web", http);
         await signIn.SignInWithClaimsAsync(user, isPersistent: true, [new Claim(SessionStore.Claim, sid)]);
@@ -103,9 +105,14 @@ public static class AccountEndpoints
 
     static IResult Back(string error) => Results.Redirect("/login?error=" + Uri.EscapeDataString(error));
 
-    static string LoginPage(string field, string token, string? error, bool bootstrap)
+    static string LoginPage(string field, string token, string? error, bool bootstrap, List<string> providers)
     {
         var e = HtmlEncoder.Default;
+        // Solo per account già collegati (da Impostazioni → Account): i provider esterni non creano account.
+        var external = providers.Count == 0 ? "" : $"""
+            <div class="login-or text-muted small">oppure</div>
+            {string.Concat(providers.Select(p => $"<a class=\"btn btn-outline-secondary w-100 mb-2\" href=\"/account/external/{e.Encode(p)}\">Continua con {e.Encode(p)}</a>"))}
+            """;
         var register = bootstrap
             ? """<button class="btn btn-outline-secondary" type="submit" formaction="/account/register-form">Crea il primo account</button>"""
             : "";
@@ -125,6 +132,8 @@ public static class AccountEndpoints
               .login-mark { width: 2rem; height: 2rem; margin-bottom: 1.25rem; fill: none; stroke: var(--text); stroke-width: 1.6; stroke-linecap: round; }
               .login-mark circle { fill: var(--text); stroke: none; }
               .login-card .btn-primary { flex: 1; }
+              .login-or { display: flex; align-items: center; gap: .75rem; margin: 1.25rem 0 .75rem; }
+              .login-or::before, .login-or::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
             </style></head>
             <body><main class="login"><div class="login-card fade-in">
               <svg class="login-mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.6 10.6 15.4 7.4M8.6 13.4l6.8 3.2" /></svg>
@@ -145,6 +154,7 @@ public static class AccountEndpoints
                 </div>
                 <p class="text-muted small mt-2 mb-0">{{hint}}</p>
               </form>
+              {{external}}
             </div></main></body></html>
             """;
     }

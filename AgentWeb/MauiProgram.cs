@@ -42,6 +42,10 @@ public static class MauiProgram
         builder.Services.AddSingleton<IAgentSettingsService, RemoteAgentSettingsService>();
         builder.Services.AddSingleton<IAccountClient>(sp => new RemoteAccountClient(sp.GetRequiredService<HttpClient>()));
 
+#if ANDROID || IOS
+        builder.Services.AddSingleton<IDevicePush, NativePush>(); // Pushy su Android, APNs su iPhone
+#endif
+
         builder.Services.AddMauiBlazorWebView();
 
 #if DEBUG

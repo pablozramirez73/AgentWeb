@@ -60,6 +60,8 @@ builder.Services.AddCascadingAuthenticationState();
 // Sessioni revocabili: ogni login ha una riga in UserSessions e il claim "sid", verificato a ogni autenticazione.
 builder.Services.AddSingleton<SessionConnections>();
 builder.Services.AddSingleton<SessionStore>();
+builder.Services.AddSingleton<Mailer>();
+builder.AddExternalProviders(); // Google/GitHub, solo se configurati (Auth:Google:ClientId, Auth:GitHub:ClientId)
 
 // Server MCP (/mcp) per agenti esterni (Claude, Hermes…): autenticazione con token API personali (Bearer awt_...).
 builder.Services.AddHttpContextAccessor();
@@ -78,12 +80,17 @@ builder.Services.AddScoped<Microsoft.AspNetCore.Components.Authorization.Authent
 
 // Rate limit su login, refresh e registrazione, per IP (oltre al lockout per account di Identity).
 var authPerMinute = builder.Configuration.GetValue("Auth:RateLimitPerMinute", 10);
+var chatPerMinute = builder.Configuration.GetValue("Chat:RateLimitPerMinute", 20);
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.AddPolicy(SessionEndpoints.AuthRateLimit, http => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
         http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions { PermitLimit = authPerMinute, Window = TimeSpan.FromMinutes(1) }));
+    // /api/chat fa girare il dibattito tra LLM: la rotta più costosa, limitata per utente.
+    o.AddPolicy(AgentApi.ChatRateLimit, http => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions { PermitLimit = chatPerMinute, Window = TimeSpan.FromMinutes(1) }));
 });
 
 // Agenti: ogni agente usa il provider LLM scelto nelle Impostazioni (Ollama locale/remoto/Cloud, OpenAI-compatibile, Anthropic).
@@ -106,10 +113,13 @@ builder.Services.AddSingleton<AgentActivity>();
 builder.Services.AddSingleton<WorkspaceStore>();
 builder.Services.AddSingleton<AgentRuntime>();
 builder.Services.AddHostedService<AgentWorker>();
+builder.Services.AddSingleton<PushSender>();
+builder.Services.AddHostedService<PushNotifier>(); // notifiche push per menzioni, canali privati e task
 builder.Services.AddHostedService<WorkspaceHubBridge>();
 builder.Services.AddScoped<IWorkspaceClient, LocalWorkspaceClient>();
 builder.Services.AddScoped<IUserSession, LocalUserSession>();
 builder.Services.AddScoped<IAccountClient, LocalAccountClient>();
+builder.Services.AddScoped<AgentWeb.Shared.Services.IDevicePush, AgentWeb.Shared.Services.BrowserPush>();
 builder.Services.AddScoped<IAgentSettingsService, LocalAgentSettingsService>();
 
 // Compressione delle risposte: zstd (RFC 8878) per chi lo accetta, poi Brotli e Gzip (default di ASP.NET Core 11).
@@ -149,6 +159,8 @@ app.UseAntiforgery();
 app.MapStaticAssets().AllowAnonymous();
 app.MapAccountEndpoints();
 app.MapTwoFactorEndpoints();
+app.MapPushEndpoints();
+app.MapProfileEndpoints(); // profilo, foto, verifica email, accessi esterni
 app.MapSessionEndpoints(); // /identity/login e /identity/refresh con sessione; MapIdentityApi non è più mappato (niente self-signup)
 // Riconnessione con stato: in una breve perdita di rete i messaggi restano nel buffer e vengono reinviati,
 // senza nuova connessione né replay del canale (oltre il buffer subentra la riconnessione normale + replay).

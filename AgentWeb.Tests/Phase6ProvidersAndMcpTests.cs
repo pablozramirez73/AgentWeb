@@ -319,6 +319,22 @@ public sealed class Phase6AgentsTests : IAsyncLifetime
         Assert.Equal("Pubblico", card.Name);
         var client = A2AClientFactory.Create(card, http);
         Assert.Equal("parere dell'esperto", await AgentConnections.AskA2AAsync(client, "ciao"));
+        Assert.Contains(card.SupportedInterfaces, i => i.ProtocolBinding == "HTTP+JSON" && i.Url.EndsWith("/a2a/Pubblico/rest"));
+    }
+
+    [Fact]
+    public async Task A2AAgent_AnswersOnTheHttpJsonBinding_Too()
+    {
+        using var anon = app.CreateClient();
+        var body = new { message = new { messageId = Guid.NewGuid().ToString(), role = "ROLE_USER", parts = new[] { new { text = "ciao" } } } };
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsJsonAsync("/a2a/Pubblico/rest/message:send", body)).StatusCode);
+
+        var http = app.Bearer(await TokenAsync("alice@test.it"));
+        http.DefaultRequestHeaders.Add("A2A-Version", "1.0");
+        var r = await http.PostAsJsonAsync("/a2a/Pubblico/rest/message:send", body);
+        var json = await r.Content.ReadAsStringAsync();
+        Assert.True(r.IsSuccessStatusCode, json);
+        Assert.Contains("parere dell'esperto", json);
     }
 }
 

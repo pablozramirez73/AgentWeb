@@ -107,9 +107,36 @@ public sealed record TwoFactorDto(bool Enabled, string? SharedKey, string? Authe
 
 public sealed record TwoFactorCodeRequest(string Code);
 
+// Profilo: Avatar è un data URL (data:image/...;base64,...) pronto per <img>; Providers = accessi esterni configurati sul server.
+public sealed record ProfileDto(string UserName, string? DisplayName, string? Avatar, bool EmailConfirmed, bool CanSendEmail,
+    List<ExternalLoginDto> Logins, List<string> Providers);
+
+// Notifiche push. Kind del dispositivo: "web" (Web Push, Token = endpoint), "apns" (iPhone), "pushy" (Android).
+public sealed record NotificationSettingsDto(bool Mentions, bool Private, bool Tasks);
+public sealed record PushDeviceRequest(string Kind, string Token, string? P256dh = null, string? Auth = null);
+public sealed record PushTokenRequest(string Token);
+public sealed record PushConfigDto(string VapidPublicKey, List<string> Kinds); // Kinds: i servizi attivi sul server
+
+public sealed record ExternalLoginDto(string Provider, string? Account);
+
+public sealed record ProfileRequest(string? DisplayName);
+
+public sealed record AvatarRequest(string ContentType, string Base64);
+
 // Implementato in-process dal server web e via HTTP da browser (WebAssembly) e app MAUI.
 public interface IAccountClient
 {
+    Task<ProfileDto> GetProfileAsync();
+    Task SaveProfileAsync(string? displayName);
+    Task SetAvatarAsync(string? contentType, byte[]? data); // null = rimuove la foto
+    Task SendConfirmationEmailAsync();
+    Task RemoveLoginAsync(string provider);
+    Task<NotificationSettingsDto> GetNotificationSettingsAsync();
+    Task SaveNotificationSettingsAsync(NotificationSettingsDto settings);
+    Task<PushConfigDto> GetPushConfigAsync();
+    Task RegisterPushDeviceAsync(PushDeviceRequest device);
+    Task UnregisterPushDeviceAsync(string token);
+    Task<int> SendTestPushAsync(); // dispositivi raggiunti
     Task<List<SessionDto>> GetSessionsAsync();
     Task RevokeSessionAsync(string id);
     Task<int> RevokeAllSessionsAsync();

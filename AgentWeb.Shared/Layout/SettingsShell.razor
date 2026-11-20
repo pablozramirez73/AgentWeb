@@ -1,0 +1,58 @@
+@* Impostazioni a due colonne: menu delle sezioni (con ricerca) a sinistra, la sezione aperta a destra. *@
+<div class="settings-shell">
+    <aside class="settings-nav">
+        <div class="settings-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input type="search" placeholder="Cerca nelle impostazioni" aria-label="Cerca nelle impostazioni" @bind="query" @bind:event="oninput" />
+        </div>
+        @foreach (var g in Groups)
+        {
+            var items = g.Items.Where(Matches).ToList();
+            if (items.Count == 0) continue;
+            <div class="settings-group">@g.Title</div>
+            @foreach (var i in items)
+            {
+                <NavLink class="settings-item" href="@i.Href" Match="NavLinkMatch.All">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)i.Icon)</svg>
+                    @i.Label
+                </NavLink>
+            }
+        }
+    </aside>
+    <section class="settings-body">
+        <h2 class="settings-title">@Title</h2>
+        @ChildContent
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    string query = "";
+
+    sealed record Item(string Label, string Href, string Icon, string Keywords);
+    sealed record Group(string Title, Item[] Items);
+
+    static readonly Group[] Groups =
+    [
+        new("Personale",
+        [
+            new("Account", "account", """<circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />""", "profilo email password nome"),
+            new("Aspetto", "appearance", """<circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor" />""", "tema chiaro scuro dark light colori"),
+            new("Notifiche", "notifications", """<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />""", "push avvisi menzioni task"),
+            new("Sicurezza e dispositivi", "devices", """<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6Z" />""", "sessioni revoca verifica due passaggi 2fa token mcp"),
+        ]),
+        new("Workspace",
+        [
+            new("Agenti", "settings", """<rect x="4" y="7" width="16" height="12" rx="3" /><path d="M12 3v4M9 12h.01M15 12h.01" />""", "llm mcp a2a modelli provider"),
+        ]),
+        new("Risorse",
+        [
+            new("Attività", "activity", """<path d="M3 12h4l3-8 4 16 3-8h4" />""", "coda log daemon"),
+        ]),
+    ];
+
+    bool Matches(Item i) => query.Trim() is not { Length: > 0 } q
+        || i.Label.Contains(q, StringComparison.OrdinalIgnoreCase) || i.Keywords.Contains(q, StringComparison.OrdinalIgnoreCase);
+}

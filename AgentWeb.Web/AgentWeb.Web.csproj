@@ -18,6 +18,8 @@
     <PackageReference Include="AGUI.Formatting" Version="1.0.1" />
     <PackageReference Include="AGUI.Server" Version="1.0.1" />
     <PackageReference Include="Anthropic" Version="13.10.0" />
+    <PackageReference Include="dotAPNS" Version="4.6.0" />
+    <PackageReference Include="Lib.Net.Http.WebPush" Version="3.3.1" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Server.AutoPause" Version="11.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="11.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="11.0.0" />

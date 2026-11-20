@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace AgentWeb.Web;
 
@@ -95,8 +96,24 @@ public sealed class LocalUserSession(AuthenticationStateProvider auth, Navigatio
 }
 
 // Sessioni dell'utente corrente (prerender della pagina Dispositivi): stesse regole di /api/account/sessions.
-public sealed class LocalAccountClient(SessionStore sessions, AuthenticationStateProvider auth, NavigationManager nav, UserManager<AppUser> users) : IAccountClient
+public sealed class LocalAccountClient(SessionStore sessions, AuthenticationStateProvider auth, NavigationManager nav, UserManager<AppUser> users,
+    Mailer mailer, Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider schemes, IDbContextFactory<AppDb> dbf, PushSender push) : IAccountClient
 {
+    public async Task<NotificationSettingsDto> GetNotificationSettingsAsync() { await using var db = await dbf.CreateDbContextAsync(); return await PushEndpoints.GetSettingsAsync(db, (await CurrentAsync()).User); }
+    public async Task SaveNotificationSettingsAsync(NotificationSettingsDto s) { await using var db = await dbf.CreateDbContextAsync(); await PushEndpoints.SaveSettingsAsync(db, (await CurrentAsync()).User, s); }
+    public Task<PushConfigDto> GetPushConfigAsync() => Task.FromResult(new PushConfigDto(push.VapidPublicKey, push.Kinds));
+    public async Task RegisterPushDeviceAsync(PushDeviceRequest d) { var (u, sid) = await CurrentAsync(); await using var db = await dbf.CreateDbContextAsync(); await PushEndpoints.RegisterAsync(db, push, u, sid, d); }
+    public async Task UnregisterPushDeviceAsync(string token) { await using var db = await dbf.CreateDbContextAsync(); await PushEndpoints.UnregisterAsync(db, (await CurrentAsync()).User, token); }
+    public async Task<int> SendTestPushAsync() => await push.SendAsync((await CurrentAsync()).User, new("AgentWeb", "Le notifiche funzionano su questo dispositivo.", "notifications"));
+
+    async Task<AppUser> UserAsync() => await users.FindByNameAsync((await CurrentAsync()).User) ?? throw new UnauthorizedAccessException();
+
+    public async Task<ProfileDto> GetProfileAsync() => await Profile.GetAsync(users, mailer, schemes, await UserAsync());
+    public async Task SaveProfileAsync(string? displayName) => await Profile.SaveAsync(users, await UserAsync(), displayName);
+    public async Task SetAvatarAsync(string? contentType, byte[]? data) => await Profile.SetAvatarAsync(users, await UserAsync(), contentType, data);
+    public async Task SendConfirmationEmailAsync() => await Profile.SendConfirmationAsync(users, mailer, await UserAsync(), new Uri(nav.BaseUri));
+    public async Task RemoveLoginAsync(string provider) => await Profile.RemoveLoginAsync(users, await UserAsync(), provider);
+
     public Uri ServerBase => new(nav.BaseUri);
 
     async Task<(string User, string? Sid)> CurrentAsync()

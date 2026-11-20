@@ -1,0 +1,16 @@
+.section-label { font-size: .9rem; font-weight: 600; color: var(--muted); margin: 0 0 .3rem; }
+.themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .75rem; max-width: 640px; }
+.theme-option { display: flex; flex-direction: column; gap: .2rem; padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; transition: border-color .15s var(--ease); }
+.theme-option:hover { border-color: var(--border-strong); }
+.theme-option.selected { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.theme-option:has(input:focus-visible) { box-shadow: 0 0 0 4px var(--focus); }
+.theme-option input { position: absolute; opacity: 0; pointer-events: none; }
+.theme-preview { display: grid; grid-template-columns: 1fr 2fr; grid-template-rows: 1fr 1fr; gap: 4px; height: 70px; padding: 6px; border-radius: 8px; margin-bottom: .45rem; border: 1px solid var(--border); }
+.theme-preview span { border-radius: 4px; }
+.theme-preview span:first-child { grid-row: span 2; }
+.theme-light { background: #f7f7f6; }
+.theme-light span { background: #e4e4e1; }
+.theme-dark { background: #0c0c0d; }
+.theme-dark span { background: #262628; }
+.theme-system { background: linear-gradient(135deg, #f7f7f6 50%, #0c0c0d 50%); }
+.theme-system span { background: color-mix(in srgb, #808080 45%, transparent); }

@@ -1,0 +1,5 @@
+.card-block { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 1.25rem 1.4rem; margin-bottom: 1rem; }
+.card-block h4 { font-size: 1rem; font-weight: 650; margin-bottom: .3rem; }
+.card-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.section-label { font-size: .9rem; font-weight: 600; color: var(--muted); margin: 1.5rem 0 .6rem; }
+.section-label:first-of-type { margin-top: 0; }

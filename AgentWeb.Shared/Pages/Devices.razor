@@ -2,10 +2,10 @@
 @rendermode InteractiveWebAssembly
 @inject IAccountClient Account
 
-<PageTitle>Dispositivi</PageTitle>
+<PageTitle>Sicurezza e dispositivi · AgentWeb</PageTitle>
 
+<SettingsShell Title="Sicurezza e dispositivi">
 <div class="page-header">
-    <h3>Dispositivi</h3>
     <p>Ogni accesso — browser, app, terminale, agente esterno — è una sessione. Revocarla la chiude subito, anche le connessioni aperte.</p>
 </div>
 
@@ -61,16 +61,6 @@ else
 }
 @if (twoFactorMessage is { } tm) { <div class="@(tm.Ok ? "text-success" : "text-danger") mb-2" role="status">@tm.Text</div> }
 
-<h4 class="mt-4">Cambia password</h4>
-<form @onsubmit="ChangePasswordAsync" class="d-flex flex-column gap-2 mb-2" style="max-width: 360px">
-    <input class="form-control" type="password" autocomplete="current-password" @bind="currentPassword" @bind:event="oninput" placeholder="Password attuale" aria-label="Password attuale" />
-    <input class="form-control" type="password" autocomplete="new-password" @bind="newPassword" @bind:event="oninput" placeholder="Nuova password" aria-label="Nuova password" />
-    <input class="form-control" type="password" autocomplete="new-password" @bind="confirmPassword" @bind:event="oninput" placeholder="Ripeti la nuova password" aria-label="Ripeti la nuova password" />
-    <button class="btn btn-primary" type="submit" disabled="@(currentPassword.Length == 0 || newPassword.Length == 0)">Cambia password</button>
-    <div class="form-text">Almeno 6 caratteri con maiuscola, minuscola, numero e simbolo. Gli altri browser e app dovranno accedere di nuovo; i token MCP restano validi.</div>
-    @if (passwordMessage is { } pm) { <div class="@(pm.Ok ? "text-success" : "text-danger")" role="status">@pm.Text</div> }
-</form>
-
 <h4 class="mt-4">Token per agenti esterni (MCP)</h4>
 <p class="text-muted">Claude, Hermes e altri client MCP possono lavorare nel workspace come te tramite <code>@Mcp</code>: canali, messaggi, task e domande agli agenti, con i tuoi stessi permessi. Ogni token compare qui sopra come sessione "Token" e si revoca allo stesso modo.</p>
 <form @onsubmit="CreateTokenAsync" class="d-flex gap-2 mb-3">
@@ -94,6 +84,7 @@ else
         </div>
     </div>
 }
+</SettingsShell>
 
 @code {
     // Persistito dal prerender: il browser non richiede di nuovo l'elenco appena caricato sul server.
@@ -104,7 +95,6 @@ else
 
     string Mcp => new Uri(Account.ServerBase, "mcp").ToString();
 
-    string currentPassword = "", newPassword = "", confirmPassword = "";
 
     TwoFactorDto? twoFactor;
     string twoFactorCode = "";
@@ -118,21 +108,6 @@ else
         try { await change(); twoFactorMessage = (true, done); twoFactorCode = ""; twoFactor = await Account.GetTwoFactorAsync(); }
         catch (Exception ex) { twoFactorMessage = (false, ex.GetBaseException().Message); }
     }
-    (bool Ok, string Text)? passwordMessage;
-
-    async Task ChangePasswordAsync()
-    {
-        if (newPassword != confirmPassword) { passwordMessage = (false, "Le due password nuove non coincidono."); return; }
-        try
-        {
-            await Account.ChangePasswordAsync(currentPassword, newPassword);
-            passwordMessage = (true, "Password cambiata. Le altre sessioni sono state chiuse.");
-            currentPassword = newPassword = confirmPassword = "";
-        }
-        catch (Exception ex) { passwordMessage = (false, ex.GetBaseException().Message); }
-        await LoadAsync();
-    }
-
     async Task CreateTokenAsync()
     {
         try { created = await Account.CreateTokenAsync(tokenName.Trim()); tokenName = ""; }

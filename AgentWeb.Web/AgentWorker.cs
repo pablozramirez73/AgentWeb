@@ -172,7 +172,9 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             log.LogWarning(ex, "Agente {Agent} fallito", job.Agent);
-            await ws.PostAsync(job.ChannelId, "Sistema", AuthorKind.System, $"{job.Agent} non ha potuto rispondere: {ex.GetBaseException().Message}");
+            // Il canale può essere stato cancellato nel frattempo: un errore qui non deve uscire dal worker (spegnerebbe l'host).
+            try { await ws.PostAsync(job.ChannelId, "Sistema", AuthorKind.System, $"{job.Agent} non ha potuto rispondere: {ex.GetBaseException().Message}"); }
+            catch (Exception postEx) { log.LogWarning(postEx, "Avviso di errore non pubblicato nel canale {Channel}", job.ChannelId); }
         }
         finally
         {

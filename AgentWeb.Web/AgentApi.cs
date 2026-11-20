@@ -13,6 +13,8 @@ namespace AgentWeb.Web;
 // API usata dall'app MAUI (iPhone/Android), autenticata con i token di /identity/login.
 public static class AgentApi
 {
+    public const string ChatRateLimit = "chat";
+
     sealed record NameBody(string Name);
     sealed record StatusBody(WorkStatus Status);
     sealed record DocumentBody(string FileName, string Text);
@@ -103,7 +105,6 @@ public static class AgentApi
         });
         settings.MapPost("/test/llm", (LlmProviderConfig p, AgentSettingsStore store, CancellationToken ct) => TestAsync(() => store.TestLlmAsync(p, ct), seconds: 120)); // un modello locale a freddo è lento
 
-        // NDJSON: una riga per ChatResponseUpdate, inviata appena arriva (AuthorName e FinishReason inclusi).
         // Protocollo AG-UI (RunAgentInput -> eventi SSE): qualsiasi client AG-UI (AGUIChatClient, CopilotKit, @ag-ui/client) può usare il dibattito.
         app.MapPost("/api/chat", async (RunAgentInput input, IChatClient chat, IAGUIEventStreamFormatter formatter,
             IOptions<JsonOptions> json, HttpContext http, CancellationToken ct) =>
@@ -113,7 +114,7 @@ public static class AgentApi
             http.Response.ContentType = formatter.MediaType;
             http.Response.Headers.CacheControl = "no-cache";
             await formatter.WriteAsync(events, http.Response.Body, ct);
-        }).RequireAuthorization();
+        }).RequireAuthorization().RequireRateLimiting(ChatRateLimit);
     }
 
     static string User(ClaimsPrincipal u) => u.Identity?.Name ?? throw new UnauthorizedAccessException();

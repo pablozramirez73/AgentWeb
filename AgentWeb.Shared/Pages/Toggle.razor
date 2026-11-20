@@ -1,0 +1,15 @@
+@* Interruttore con etichetta e spiegazione (pagina Notifiche). *@
+<label class="form-check form-switch d-flex gap-3 align-items-start m-0 ps-0">
+    <input class="form-check-input ms-0 mt-1 flex-shrink-0" type="checkbox" role="switch" checked="@Value" @onchange="e => Changed.InvokeAsync(e.Value is true)" />
+    <span>
+        <span class="d-block fw-semibold">@Label</span>
+        <span class="d-block text-muted small">@Hint</span>
+    </span>
+</label>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public bool Value { get; set; }
+    [Parameter] public EventCallback<bool> Changed { get; set; }
+}

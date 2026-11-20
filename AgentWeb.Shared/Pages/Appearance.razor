@@ -1,0 +1,45 @@
+@page "/appearance"
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+
+<PageTitle>Aspetto · AgentWeb</PageTitle>
+
+<SettingsShell Title="Aspetto">
+    <h3 class="section-label">Tema</h3>
+    <p class="text-muted">Vale solo per questo dispositivo.</p>
+    <div class="themes" role="radiogroup" aria-label="Tema">
+        @foreach (var (value, label, hint) in Options)
+        {
+            <label class="theme-option @(theme == value ? "selected" : "")">
+                <input type="radio" name="theme" value="@value" checked="@(theme == value)" @onchange="() => SetAsync(value)" />
+                <span class="theme-preview theme-@value" aria-hidden="true"><span></span><span></span><span></span></span>
+                <strong>@label</strong>
+                <small class="text-muted">@hint</small>
+            </label>
+        }
+    </div>
+</SettingsShell>
+
+@code {
+    static readonly (string Value, string Label, string Hint)[] Options =
+    [
+        ("system", "Sistema", "Segue il dispositivo"),
+        ("light", "Chiaro", "Sempre chiaro"),
+        ("dark", "Scuro", "Sempre scuro"),
+    ];
+
+    string? theme;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        theme = await JS.InvokeAsync<string>("agentwebTheme.get");
+        StateHasChanged();
+    }
+
+    async Task SetAsync(string value)
+    {
+        theme = value;
+        await JS.InvokeVoidAsync("agentwebTheme.set", value);
+    }
+}

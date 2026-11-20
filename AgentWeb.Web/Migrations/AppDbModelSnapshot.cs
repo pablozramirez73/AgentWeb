@@ -17,7 +17,7 @@ partial class AppDbModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261119203346_DaemonQueue";
+    public override string LastMigrationId => "20261120211701_PushNotifications";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -37,9 +37,20 @@ partial class AppDbModelSnapshot : ModelSnapshot
                 b.Property<int>("AccessFailedCount")
                     .HasColumnType("integer");
 
+                b.Property<byte[]>("Avatar")
+                    .HasColumnType("bytea");
+
+                b.Property<string>("AvatarType")
+                    .HasMaxLength(20)
+                    .HasColumnType("character varying(20)");
+
                 b.Property<string>("ConcurrencyStamp")
                     .IsConcurrencyToken()
                     .HasColumnType("text");
+
+                b.Property<string>("DisplayName")
+                    .HasMaxLength(60)
+                    .HasColumnType("character varying(60)");
 
                 b.Property<string>("Email")
                     .HasMaxLength(256)
@@ -61,6 +72,21 @@ partial class AppDbModelSnapshot : ModelSnapshot
                 b.Property<string>("NormalizedUserName")
                     .HasMaxLength(256)
                     .HasColumnType("character varying(256)");
+
+                b.Property<bool>("NotifyMentions")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("boolean")
+                    .HasDefaultValue(true);
+
+                b.Property<bool>("NotifyPrivate")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("boolean")
+                    .HasDefaultValue(true);
+
+                b.Property<bool>("NotifyTasks")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("boolean")
+                    .HasDefaultValue(true);
 
                 b.Property<string>("PasswordHash")
                     .HasColumnType("text");
@@ -327,6 +353,52 @@ partial class AppDbModelSnapshot : ModelSnapshot
                     .HasFilter("\"ClientId\" IS NOT NULL");
 
                 b.ToTable("Messages");
+            });
+
+        modelBuilder.Entity("AgentWeb.Web.PushDeviceEntity", b =>
+            {
+                var id = b.Property<long>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("bigint");
+
+                NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(id);
+
+                b.Property<string>("Auth")
+                    .HasColumnType("text");
+
+                b.Property<DateTimeOffset>("CreatedAt")
+                    .HasColumnType("timestamp with time zone");
+
+                b.Property<string>("Kind")
+                    .IsRequired()
+                    .HasMaxLength(10)
+                    .HasColumnType("character varying(10)");
+
+                b.Property<string>("P256dh")
+                    .HasColumnType("text");
+
+                b.Property<string>("Sid")
+                    .HasColumnType("text");
+
+                b.Property<string>("Token")
+                    .IsRequired()
+                    .HasMaxLength(1000)
+                    .HasColumnType("character varying(1000)");
+
+                b.Property<string>("UserName")
+                    .IsRequired()
+                    .HasColumnType("text");
+
+                b.HasKey("Id");
+
+                b.HasIndex("Sid");
+
+                b.HasIndex("Token")
+                    .IsUnique();
+
+                b.HasIndex("UserName");
+
+                b.ToTable("PushDevices");
             });
 
         modelBuilder.Entity("AgentWeb.Web.ReadCursorEntity", b =>
