@@ -11,3 +11,4 @@ obj/
 .DS_Store
 agentweb.db*
 agentsettings.json
+*.swp
