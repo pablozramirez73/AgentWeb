@@ -14,7 +14,7 @@
         </form>
         <div class="channels-head">Canali</div>
         <ul class="channel-links">
-            @foreach (var c in ChannelList ?? [])
+            @foreach (var c in (ChannelList ?? []).Where(c => c.With is null)) @* i messaggi diretti stanno nella pagina Messaggi *@
             {
                 <li>
                     <a href="channels/@c.Id" class="channel-link @(c.Id == ChannelId ? "active" : "")" aria-current="@(c.Id == ChannelId ? "page" : null)">
@@ -266,7 +266,7 @@
                                 {
                                     <button class="btn btn-outline-success btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Done)">Fatto</button>
                                 }
-                                @if (t.Status is WorkStatus.Done or WorkStatus.Failed)
+                                @if (t.Status is WorkStatus.Done or WorkStatus.Failed or WorkStatus.Closed or WorkStatus.Backlog)
                                 {
                                     <button class="btn btn-outline-secondary btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Todo)">Riapri</button>
                                 }
@@ -645,7 +645,7 @@
         return parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}" : name[..Math.Min(2, name.Length)];
     }
 
-    static string Label(WorkStatus s) => s switch { WorkStatus.Todo => "Da fare", WorkStatus.InProgress => "In corso", WorkStatus.Done => "Fatto", _ => "Fallito" };
+    static string Label(WorkStatus s) => s switch { WorkStatus.Todo => "Da fare", WorkStatus.InProgress => "In corso", WorkStatus.Done => "Fatto", WorkStatus.Backlog => "Backlog", WorkStatus.Closed => "Chiuso", _ => "Fallito" };
 
     public async ValueTask DisposeAsync()
     {

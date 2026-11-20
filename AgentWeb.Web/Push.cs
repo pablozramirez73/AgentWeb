@@ -169,7 +169,7 @@ public sealed partial class PushNotifier(WorkspaceBus bus, IDbContextFactory<App
     public async Task<List<(string User, PushNote Note)>> RecipientsAsync(WorkspaceEvent e)
     {
         await using var db = await dbf.CreateDbContextAsync();
-        if (await db.Channels.Where(c => c.Id == e.ChannelId).Select(c => new { c.Name, c.IsPrivate }).FirstOrDefaultAsync() is not { } ch) return [];
+        if (await db.Channels.Where(c => c.Id == e.ChannelId).Select(c => new { c.Name, c.IsPrivate, c.DirectKey }).FirstOrDefaultAsync() is not { } ch) return [];
         // Solo chi ha almeno un dispositivo registrato: gli altri non riceverebbero comunque niente.
         var users = await db.Users.Where(u => db.PushDevices.Any(d => d.UserName == u.UserName))
             .Select(u => new { Name = u.UserName!, u.NotifyMentions, u.NotifyPrivate, u.NotifyTasks }).ToListAsync();
@@ -185,7 +185,9 @@ public sealed partial class PushNotifier(WorkspaceBus bus, IDbContextFactory<App
                 var mention = u.NotifyMentions && mentioned.Contains(Handle(u.Name));
                 if (!mention && !(u.NotifyPrivate && ch.IsPrivate)) continue;
                 if (!await ChannelVisibility.CanAccessAsync(db, e.ChannelId, u.Name)) continue;
-                result.Add((u.Name, new(mention ? $"{Handle(m.Author)} ti ha menzionato in #{ch.Name}" : $"#{ch.Name} · {Handle(m.Author)}", body, url)));
+                var title = ch.DirectKey is not null ? $"{Handle(m.Author)} ti ha scritto"
+                    : mention ? $"{Handle(m.Author)} ti ha menzionato in #{ch.Name}" : $"#{ch.Name} · {Handle(m.Author)}";
+                result.Add((u.Name, new(title, body, ch.DirectKey is not null ? "messages" : url)));
             }
         }
         else if (e is { Kind: "task", Task: { AssigneeIsAgent: false, Assignee: { } assignee, Status: WorkStatus.Todo } t } && assignee != t.CreatedBy

@@ -17,7 +17,7 @@ partial class AppDbModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261120214203_ThreadReadCursors";
+    public override string LastMigrationId => "20261120224534_DirectMessages";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -149,6 +149,9 @@ partial class AppDbModelSnapshot : ModelSnapshot
                 b.Property<string>("CreatedBy")
                     .HasColumnType("text");
 
+                b.Property<string>("DirectKey")
+                    .HasColumnType("text");
+
                 b.Property<bool>("IsPrivate")
                     .HasColumnType("boolean");
 
@@ -157,6 +160,9 @@ partial class AppDbModelSnapshot : ModelSnapshot
                     .HasColumnType("text");
 
                 b.HasKey("Id");
+
+                b.HasIndex("DirectKey")
+                    .IsUnique();
 
                 b.HasIndex("Name")
                     .IsUnique();

@@ -1,7 +1,8 @@
 namespace AgentWeb.Shared.Workspace;
 
 // Unread: messaggi altrui dopo l'ultimo letto; Mentions: tra questi, quelli che citano @<utente> (parte prima della @ dell'email).
-public sealed record ChannelDto(int Id, string Name, bool IsPrivate = false, string? CreatedBy = null, int Unread = 0, int Mentions = 0);
+// With: nei messaggi diretti, l'altro partecipante (email della persona o nome dell'agente); null nei canali normali.
+public sealed record ChannelDto(int Id, string Name, bool IsPrivate = false, string? CreatedBy = null, int Unread = 0, int Mentions = 0, string? With = null);
 
 // Agenti del canale (rispondono alle @menzioni, ricevono task, collaborano qui), quelli che si possono ancora aggiungere
 // e se l'utente può gestirli (solo chi ha creato il canale).
@@ -17,7 +18,9 @@ public sealed record SearchHitDto(MessageDto Message, string ChannelName);
 
 public sealed record MarkReadRequest(long LastId);
 
-public enum WorkStatus { Todo, InProgress, Done, Failed }
+// Backlog e Closed in fondo: i valori già salvati nel DB (interi) non cambiano significato.
+// Backlog = parcheggiato (gli agenti non lo prendono); Closed = annullato senza farlo.
+public enum WorkStatus { Todo, InProgress, Done, Failed, Backlog, Closed }
 
 // Pagina Attività: lavori degli agenti in corso e ultimi terminati (Seconds/Error), task aperti.
 public sealed record AgentRunDto(string Agent, int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double? Seconds, string? Error);
@@ -25,7 +28,7 @@ public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Re
 
 // Pagina Attività (inbox): una voce per canale (Root = null) o per thread che ti riguarda (scritto, risposto o menzionato).
 // Last: l'ultimo messaggio (del canale fuori dai thread, oppure del thread). Unread: messaggi altrui non ancora letti.
-public sealed record FeedItemDto(int ChannelId, string Channel, bool IsPrivate, MessageDto? Root, MessageDto Last, int Replies, int Unread);
+public sealed record FeedItemDto(int ChannelId, string Channel, bool IsPrivate, MessageDto? Root, MessageDto Last, int Replies, int Unread, string? With = null);
 
 public sealed record TaskDto(int Id, int ChannelId, string Title, string Description, string? Assignee, bool AssigneeIsAgent,
     WorkStatus Status, string? Result, string CreatedBy, DateTimeOffset UpdatedAt);
@@ -91,6 +94,9 @@ public interface IWorkspaceClient
     Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId);
     Task MarkThreadReadAsync(int channelId, long rootId, long lastId); // segna letto il thread senza toccare il resto del canale
     Task<List<TaskDto>> GetTasksAsync(int channelId);
+    Task<List<TaskDto>> GetAllTasksAsync();
+    Task<ChannelDto> OpenDirectAsync(string with); // conversazione diretta con una persona (email) o un agente: la crea la prima volta
+    Task<List<string>> GetPeopleAsync();          // persone viste nei canali che l'utente vede (per scegliere a chi scrivere) // pagina Task: tutti i task dei canali visibili, aggiornati di recente per primi
     Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task);
     Task SetTaskStatusAsync(int taskId, WorkStatus status);
     Task<List<string>> GetAgentsAsync();

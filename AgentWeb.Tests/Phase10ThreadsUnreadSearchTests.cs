@@ -164,4 +164,48 @@ public sealed class Phase10ThreadsUnreadSearchTests : IAsyncLifetime
         Assert.Equal(3, feed.Single(f => f.Root is null && f.ChannelId == c).Unread);
         Assert.Equal(HttpStatusCode.NotFound, (await bob.PostAsJsonAsync($"/api/workspace/channels/{secret}/threads/{t.Root.Id}/read", new MarkReadRequest(1))).StatusCode);
     }
+
+    [Fact]
+    public async Task AllTasks_OnlyVisibleChannels_AndBoardStatusRules()
+    {
+        var c = await ChannelAsync(alice, "board");
+        var secret = await ChannelAsync(alice, "segreto", isPrivate: true);
+        async Task<TaskDto> NewTask(int ch, string title) =>
+            (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{ch}/tasks", new NewTaskRequest(title, "", null))).Content.ReadFromJsonAsync<TaskDto>())!;
+        var t = await NewTask(c, "pubblico");
+        await NewTask(secret, "privato");
+
+        Assert.Equal(["pubblico"], (await bob.GetFromJsonAsync<List<TaskDto>>("/api/workspace/tasks"))!.Select(x => x.Title));
+        Assert.Equal(2, (await alice.GetFromJsonAsync<List<TaskDto>>("/api/workspace/tasks"))!.Count);
+
+        // Ogni colonna della board tranne "Fallito" (lo decide solo un agente).
+        foreach (var s in new[] { WorkStatus.Backlog, WorkStatus.InProgress, WorkStatus.Done, WorkStatus.Closed, WorkStatus.Todo })
+        {
+            (await bob.PostAsJsonAsync($"/api/workspace/tasks/{t.Id}/status", new { status = s })).EnsureSuccessStatusCode();
+            Assert.Equal(s, (await bob.GetFromJsonAsync<List<TaskDto>>("/api/workspace/tasks"))!.Single().Status);
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await bob.PostAsJsonAsync($"/api/workspace/tasks/{t.Id}/status", new { status = WorkStatus.Failed })).StatusCode);
+    }
+
+    [Fact]
+    public async Task DirectMessages_AreOnePrivateConversationPerPair()
+    {
+        await app.CreateUserAsync("carol@test.it");
+        using var carol = await app.LoginAsync("carol@test.it");
+        async Task<ChannelDto> Open(HttpClient http, string with) =>
+            (await (await http.PostAsJsonAsync("/api/workspace/direct", new { name = with })).Content.ReadFromJsonAsync<ChannelDto>())!;
+
+        var dm = await Open(alice, "bob@test.it");
+        Assert.Equal("bob@test.it", dm.With);
+        Assert.Equal(dm.Id, (await Open(bob, "alice@test.it")).Id); // la stessa conversazione da entrambe le parti
+        await PostAsync(bob, dm.Id, "ciao alice");
+
+        Assert.Equal("alice@test.it", (await bob.GetFromJsonAsync<List<ChannelDto>>("/api/workspace/channels"))!.Single(c => c.Id == dm.Id).With);
+        Assert.Equal(1, (await alice.GetFromJsonAsync<List<FeedItemDto>>("/api/workspace/feed"))!.Single(f => f.ChannelId == dm.Id).Unread);
+        Assert.Equal(HttpStatusCode.NotFound, (await carol.GetAsync($"/api/workspace/channels/{dm.Id}/messages")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await alice.PostAsJsonAsync($"/api/workspace/channels/{dm.Id}/members", new { name = "carol@test.it" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await alice.PostAsJsonAsync("/api/workspace/direct", new { name = "nessuno@test.it" })).StatusCode);
+        Assert.Contains("bob@test.it", (await alice.GetFromJsonAsync<List<string>>("/api/workspace/people"))!);
+        Assert.DoesNotContain("carol@test.it", (await alice.GetFromJsonAsync<List<string>>("/api/workspace/people"))!); // mai vista nei canali di alice
+    }
 }

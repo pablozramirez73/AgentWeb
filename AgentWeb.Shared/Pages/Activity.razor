@@ -1,18 +1,35 @@
 @page "/activity"
+@page "/messages"
 @rendermode InteractiveWebAssembly
 @implements IAsyncDisposable
 @inject IWorkspaceClient Ws
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
-<PageTitle>Attività · AgentWeb</PageTitle>
+<PageTitle>@(Direct ? "Messaggi" : "Attività") · AgentWeb</PageTitle>
 
-@* Inbox a due colonne: a sinistra le conversazioni che ti riguardano (canali e thread), a destra quella aperta, con risposta diretta. *@
+@* Inbox a due colonne: a sinistra le conversazioni che ti riguardano (canali e thread), a destra quella aperta, con risposta diretta.
+   Su /messages la stessa inbox mostra solo i messaggi diretti (con persone o agenti) e permette di iniziarne uno nuovo. *@
 <div class="activity @(selected is null ? "" : "has-selection")">
-    <section class="inbox" aria-label="Attività">
+    <section class="inbox" aria-label="@(Direct ? "Messaggi" : "Attività")">
         <header class="inbox-head">
-            <h2>Attività</h2>
-            <span class="inbox-count">@Running.Count in corso · @feed.Sum(f => f.Unread) non letti</span>
+            <h2>@(Direct ? "Messaggi" : "Attività")</h2>
+            <span class="inbox-count">@(Direct ? "" : $"{Running.Count} in corso · ")@Visible.Sum(f => f.Unread) non letti</span>
         </header>
+        @if (Direct)
+        {
+            <form class="inbox-tools new-dm" @onsubmit="StartDirectAsync">
+                <input class="form-control form-control-sm" list="dm-people" placeholder="Scrivi a… (email o agente)" aria-label="Nuovo messaggio a"
+                       @bind="newWith" @bind:event="oninput" />
+                <datalist id="dm-people">
+                    @foreach (var a in agents) { <option value="@a">agente</option> }
+                    @foreach (var p in people) { <option value="@p"></option> }
+                </datalist>
+                <button class="btn btn-primary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newWith)">Nuovo</button>
+            </form>
+        }
+        else
+        {
         <div class="inbox-tools">
             <label class="filter">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
@@ -25,11 +42,12 @@
                 </select>
             </label>
         </div>
+        }
         @if (error is not null) { <div class="alert alert-danger py-2 mx-3" role="alert">@error</div> }
 
         <div class="inbox-list">
             @if (loading) { <p class="text-muted px-3">Caricamento…</p> }
-            @if (filter is "all" or "agents" && Running.Count > 0)
+            @if (!Direct && filter is "all" or "agents" && Running.Count > 0)
             {
                 <div class="day">In corso</div>
                 @foreach (var r in Running)
@@ -43,7 +61,7 @@
                     </button>
                 }
             }
-            @if (filter == "agents")
+            @if (!Direct && filter == "agents")
             {
                 <div class="day">Appena terminati</div>
                 @if (activity?.Recent.Count is null or 0) { <p class="text-muted px-3 small">Ancora niente da quando il server è partito.</p> }
@@ -69,7 +87,11 @@
                     {
                         <button class="item @(f.Unread > 0 ? "unread" : "") @(IsSelected(f) ? "selected" : "")" @key="Key(f)" @onclick="() => Open(f.ChannelId, f.Root?.Id)">
                             <span class="item-icon tile">
-                                @if (f.Root is not null)
+                                @if (f.With is { } w && f.Root is null)
+                                {
+                                    @Who(w, "2.25rem")
+                                }
+                                else if (f.Root is not null)
                                 {
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4Z" /></svg>
                                     <span class="tile-badge">@(f.IsPrivate ? "🔒" : "#")</span>
@@ -78,9 +100,9 @@
                                 else { <span class="hash" aria-hidden="true">#</span> }
                             </span>
                             <span class="item-body">
-                                <span class="item-title">@(f.Root is { } r ? Short(r.Text, 60) : f.Channel)</span>
+                                <span class="item-title">@(f.Root is { } r ? Short(r.Text, 60) : Title(f.Channel, f.With))</span>
                                 <span class="item-preview">
-                                    @if (f.Root is not null) { <span class="item-channel">#@f.Channel ·</span> }
+                                    @if (f.Root is not null) { <span class="item-channel">@Title(f.Channel, f.With) ·</span> }
                                     @if (f.Last.Kind == AuthorKind.Agent) { @AgentAvatar(f.Last.Author, "1.1rem") }
                                     <strong>@Name(f.Last.Author):</strong> @Short(f.Last.Text, 90)
                                 </span>
@@ -101,22 +123,25 @@
         {
             <div class="empty">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
-                <p>Scegli una conversazione a sinistra.</p>
+                <p>@(Direct ? "Scegli una conversazione o scrivi a qualcuno." : "Scegli una conversazione a sinistra.")</p>
             </div>
         }
         else
         {
             var item = feed.FirstOrDefault(f => f.ChannelId == sel.ChannelId && f.Root?.Id == sel.RootId);
             var channelName = item?.Channel ?? Running.FirstOrDefault(r => r.ChannelId == sel.ChannelId)?.Channel ?? "";
+            var with = item?.With ?? selectedWith;
+            var label = Title(channelName, with);
             var people = conversation.Where(m => m.Kind != AuthorKind.System).Select(m => (m.Author, m.Kind)).Distinct().ToList();
             <header class="conv-head">
                 <button class="btn btn-icon conv-back" aria-label="Torna all'elenco" @onclick="Close">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
                 </button>
                 <div class="conv-title">
-                    <strong>@(sel.RootId is not null && conversation.FirstOrDefault() is { } root ? $"{Name(root.Author)}: {Short(root.Text, 90)}" : $"#{channelName}")</strong>
+                    <strong>@(sel.RootId is not null && conversation.FirstOrDefault() is { } root ? $"{Name(root.Author)}: {Short(root.Text, 90)}" : label)</strong>
                     <span class="conv-meta">
-                        <a href="channels/@sel.ChannelId">#@channelName</a>
+                        @if (with is null) { <a href="channels/@sel.ChannelId">#@channelName</a> }
+                        else { <span>@(agents.Contains(with) ? "Messaggio diretto con un agente" : "Messaggio diretto")</span> }
                         @if (sel.RootId is not null) { <span> · @(conversation.Count - 1) risposte</span> }
                     </span>
                 </div>
@@ -172,7 +197,7 @@
 
             <form class="conv-composer" @onsubmit="SendAsync">
                 <textarea @ref="composer" rows="1" maxlength="4000" @bind="draft" @bind:event="oninput"
-                          placeholder="@(sel.RootId is null ? $"Scrivi in #{channelName}" : "Rispondi nel thread")" aria-label="Messaggio"></textarea>
+                          placeholder="@(sel.RootId is not null ? "Rispondi nel thread" : with is null ? $"Scrivi in #{channelName}" : $"Scrivi a {Name(with)}")" aria-label="Messaggio"></textarea>
                 <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="Invia">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                 </button>
@@ -186,7 +211,11 @@
     ActivityDto? activity;
     List<MessageDto> conversation = [];
     (int ChannelId, long? RootId)? selected;
-    string filter = "all", draft = "";
+    string filter = "all", draft = "", newWith = "";
+    string? selectedWith;
+    List<string> people = [], agents = [];
+
+    bool Direct => Nav.ToBaseRelativePath(Nav.Uri).StartsWith("messages");
     string? error;
     bool loading = true;
     ElementReference composer;
@@ -197,7 +226,7 @@
 
     List<AgentRunDto> Running => activity?.Running ?? [];
 
-    List<FeedItemDto> Visible => filter switch
+    List<FeedItemDto> Visible => Direct ? feed.Where(f => f.With is not null).ToList() : filter switch
     {
         "unread" => feed.Where(f => f.Unread > 0).ToList(),
         "threads" => feed.Where(f => f.Root is not null).ToList(),
@@ -213,6 +242,8 @@
             Ws.Changed += OnEvent;
             feed = await Ws.GetFeedAsync();
             activity = await Ws.GetActivityAsync();
+            people = await Ws.GetPeopleAsync();
+            agents = await Ws.GetAgentsAsync();
         });
         loading = false;
         if (!OperatingSystem.IsBrowser() && !OperatingSystem.IsIOS() && !OperatingSystem.IsAndroid()) return; // prerender: niente timer né icone
@@ -267,9 +298,25 @@
         });
     }
 
-    Task Open(int channelId, long? rootId) => Run(async () =>
+    // /activity e /messages usano la stessa istanza della pagina: cambiando sezione si chiude la conversazione aperta.
+    bool? shownDirect;
+    protected override void OnParametersSet()
+    {
+        if (shownDirect is { } d && d != Direct) selected = null;
+        shownDirect = Direct;
+    }
+
+    Task StartDirectAsync() => Run(async () =>
+    {
+        var c = await Ws.OpenDirectAsync(newWith.Trim());
+        newWith = "";
+        await Open(c.Id, null, c.With);
+    });
+
+    Task Open(int channelId, long? rootId, string? with = null) => Run(async () =>
     {
         selected = (channelId, rootId);
+        selectedWith = with;
         draft = "";
         conversation = rootId is { } r ? await Ws.GetThreadAsync(channelId, r)
             : (await Ws.GetMessagesAsync(channelId)).Where(m => m.ParentId is null).TakeLast(200).ToList();
@@ -335,6 +382,12 @@
     }
 
     static string Name(string author) => author.Split('@')[0];
+
+    static string Title(string channel, string? with) => with is null ? channel : Name(with);
+
+    RenderFragment Who(string who, string size) => agents.Contains(who) || agentIcons.ContainsKey(who)
+        ? AgentAvatar(who, size)
+        : @<span class="avatar" style="--size: @size">@Initials(who)</span>;
 
     static string Initials(string user)
     {

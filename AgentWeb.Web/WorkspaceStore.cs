@@ -45,14 +45,17 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         var mention = MentionPattern(user);
         // shortcut: conteggi calcolati da Postgres a ogni lettura della lista (subquery per canale); con molti canali/messaggi
         // servirebbe una proiezione mantenuta (es. tabella aggiornata dall'insert o un motore di streaming).
-        return await ChannelVisibility.Visible(db, user).OrderBy(c => c.Name).Select(c => new
+        return (await ChannelVisibility.Visible(db, user).OrderBy(c => c.Name).Select(c => new
         {
             c,
             Last = db.ReadCursors.Where(r => r.ChannelId == c.Id && r.UserName == user).Select(r => (long?)r.LastReadId).FirstOrDefault() ?? 0,
-        }).Select(x => new ChannelDto(x.c.Id, x.c.Name, x.c.IsPrivate, x.c.CreatedBy,
-            db.Messages.Count(m => m.ChannelId == x.c.Id && m.Id > x.Last && m.Author != user && m.Kind != AuthorKind.System),
-            db.Messages.Count(m => m.ChannelId == x.c.Id && m.Id > x.Last && m.Author != user && m.Kind != AuthorKind.System && EF.Functions.ILike(m.Text, mention, "\\"))))
-            .ToListAsync();
+        }).Select(x => new
+        {
+            Dto = new ChannelDto(x.c.Id, x.c.Name, x.c.IsPrivate, x.c.CreatedBy,
+                db.Messages.Count(m => m.ChannelId == x.c.Id && m.Id > x.Last && m.Author != user && m.Kind != AuthorKind.System),
+                db.Messages.Count(m => m.ChannelId == x.c.Id && m.Id > x.Last && m.Author != user && m.Kind != AuthorKind.System && EF.Functions.ILike(m.Text, mention, "\\")), null),
+            x.c.DirectKey,
+        }).ToListAsync()).Select(x => x.Dto with { With = DirectWith(x.DirectKey, user) }).ToList();
     }
 
     // "@alice" per alice@esempio.it; % e _ dell'email non devono fare da jolly.
@@ -90,7 +93,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         var visible = ChannelVisibility.Visible(db, user);
         var channels = await visible.Select(c => new
         {
-            c.Id, c.Name, c.IsPrivate,
+            c.Id, c.Name, c.IsPrivate, c.DirectKey,
             Last = db.Messages.Where(m => m.ChannelId == c.Id && m.ParentId == null).OrderByDescending(m => m.Id).FirstOrDefault(),
             Unread = db.Messages.Count(m => m.ChannelId == c.Id && m.ParentId == null && m.Author != user && m.Kind != AuthorKind.System
                 && m.Id > (db.ReadCursors.Where(r => r.ChannelId == c.Id && r.UserName == user).Select(r => (long?)r.LastReadId).FirstOrDefault() ?? 0)),
@@ -114,9 +117,9 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             .ToListAsync();
 
         var byId = channels.ToDictionary(c => c.Id);
-        return channels.Select(c => new FeedItemDto(c.Id, c.Name, c.IsPrivate, null, ToDto(c.Last!), 0, c.Unread))
+        return channels.Select(c => new FeedItemDto(c.Id, c.Name, c.IsPrivate, null, ToDto(c.Last!), 0, c.Unread, DirectWith(c.DirectKey, user)))
             .Concat(threads.Select(t => new FeedItemDto(t.Root.ChannelId, byId.TryGetValue(t.Root.ChannelId, out var c) ? c.Name : "", byId.TryGetValue(t.Root.ChannelId, out var p) && p.IsPrivate,
-                ToDto(t.Root), ToDto(t.Last), t.Replies, t.Unread)))
+                ToDto(t.Root), ToDto(t.Last), t.Replies, t.Unread, byId.TryGetValue(t.Root.ChannelId, out var d) ? DirectWith(d.DirectKey, user) : null)))
             .OrderByDescending(f => f.Last.Id).ToList();
     }
 
@@ -165,6 +168,62 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         return await ChannelVisibility.CanAccessAsync(db, channelId, user);
     }
 
+    // L'altro partecipante visto da "user" (persona o agente), null se non è un messaggio diretto.
+    public static string? DirectWith(string? key, string user)
+    {
+        if (key is null) return null;
+        var other = key.Split('|').FirstOrDefault(p => p != user) ?? user; // con sé stessi: sé stessi
+        return other.StartsWith("agent:") ? other[6..] : other;
+    }
+
+    // Messaggi diretti: un canale privato con i due partecipanti come membri (stesse regole di visibilità, notifiche e
+    // non letti degli altri canali). Con un agente: l'utente è l'unico membro e l'agente è nel canale e risponde a ogni messaggio.
+    public async Task<ChannelDto> OpenDirectAsync(string user, string with)
+    {
+        with = Required(with, 256, "Destinatario");
+        var agent = settings.Get().EnabledAgentNames().FirstOrDefault(a => a.Equals(with.TrimStart('@'), StringComparison.OrdinalIgnoreCase));
+        await using var db = await dbf.CreateDbContextAsync();
+        string key;
+        if (agent is not null) key = $"{user}|agent:{agent}";
+        else
+        {
+            var person = await db.Users.Where(u => u.UserName == with).Select(u => u.UserName).FirstOrDefaultAsync()
+                ?? throw new ArgumentException($"Utente \"{with}\" inesistente.");
+            key = string.Join('|', new[] { user, person! }.Distinct().Order(StringComparer.Ordinal));
+        }
+        var existing = await db.Channels.FirstOrDefaultAsync(c => c.DirectKey == key);
+        if (existing is null)
+        {
+            existing = new ChannelEntity { Name = $"dm-{Guid.NewGuid():N}"[..15], IsPrivate = true, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = user, DirectKey = key };
+            await using var tx = await db.Database.BeginTransactionAsync();
+            db.Channels.Add(existing);
+            try { await db.SaveChangesAsync(); }
+            catch (DbUpdateException) // l'altro l'ha aperta nello stesso istante
+            {
+                await tx.RollbackAsync();
+                await using var again = await dbf.CreateDbContextAsync();
+                existing = await again.Channels.SingleAsync(c => c.DirectKey == key);
+                return new(existing.Id, existing.Name, true, existing.CreatedBy, With: DirectWith(key, user));
+            }
+            foreach (var member in key.Split('|').Where(p => !p.StartsWith("agent:")))
+                db.ChannelMembers.Add(new() { ChannelId = existing.Id, UserName = member, AddedAt = DateTimeOffset.UtcNow });
+            if (agent is not null) db.ChannelAgents.Add(new() { ChannelId = existing.Id, AgentName = agent, AddedAt = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+        }
+        return new(existing.Id, existing.Name, true, existing.CreatedBy, With: DirectWith(key, user));
+    }
+
+    // Per scegliere a chi scrivere: solo persone che l'utente vede già nei suoi canali (niente elenco completo degli utenti).
+    public async Task<List<string>> GetPeopleAsync(string user)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        var visible = ChannelVisibility.Visible(db, user);
+        var authors = db.Messages.Where(m => m.Kind == AuthorKind.User && visible.Any(c => c.Id == m.ChannelId)).Select(m => m.Author);
+        var members = db.ChannelMembers.Where(m => visible.Any(c => c.Id == m.ChannelId)).Select(m => m.UserName);
+        return await authors.Union(members).Where(n => n != user).OrderBy(n => n).ToListAsync();
+    }
+
     public async Task<ChannelDto> CreateChannelAsync(string name, string user, bool isPrivate = false)
     {
         name = Regex.Replace(Required(name, 50, "Nome canale").ToLowerInvariant(), @"\s+", "-");
@@ -204,6 +263,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var channel = await db.Channels.SingleAsync(c => c.Id == channelId);
         if (!channel.IsPrivate) throw new ArgumentException("Il canale è pubblico: lo vedono già tutti.");
+        if (channel.DirectKey is not null) throw new ArgumentException("Un messaggio diretto resta tra due: crea un canale privato per più persone.");
         if (!await db.Users.AnyAsync(u => u.UserName == newMember)) throw new ArgumentException($"Utente \"{newMember}\" inesistente.");
         if (await db.ChannelMembers.AnyAsync(m => m.ChannelId == channelId && m.UserName == newMember)) return;
         db.ChannelMembers.Add(new() { ChannelId = channelId, UserName = newMember, AddedAt = DateTimeOffset.UtcNow });
@@ -267,6 +327,9 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         {
             // Rispondono solo gli agenti del canale; a una persona che menziona un agente assente si spiega perché tace.
             var inChannel = await ChannelAgentNamesAsync(channelId);
+            if (kind == AuthorKind.User && await DirectAgentAsync(channelId) is { } direct && inChannel.Contains(direct, StringComparer.OrdinalIgnoreCase)
+                && !Mentions(text).Contains(direct, StringComparer.OrdinalIgnoreCase))
+                queue.Enqueue(new(channelId, direct, null, depth + 1, parentId)); // in un messaggio diretto con un agente non serve la @menzione
             foreach (var agent in Mentions(text).Where(a => !a.Equals(author, StringComparison.OrdinalIgnoreCase)))
             {
                 if (inChannel.Contains(agent, StringComparer.OrdinalIgnoreCase)) queue.Enqueue(new(channelId, agent, null, depth + 1, parentId));
@@ -275,6 +338,13 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             }
         }
         return dto;
+    }
+
+    async Task<string?> DirectAgentAsync(int channelId)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        var key = await db.Channels.Where(c => c.Id == channelId).Select(c => c.DirectKey).FirstOrDefaultAsync();
+        return key?.Split("|agent:") is [_, var agent] ? agent : null;
     }
 
     public Task<List<string>> GetAgentsAsync() => Task.FromResult(settings.Get().EnabledAgentNames().ToList());
@@ -399,8 +469,8 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         if (description.Length > 4000) description = description[..4000];
         var agents = settings.Get().EnabledAgentNames().ToHashSet(StringComparer.OrdinalIgnoreCase);
         await using var db = await dbf.CreateDbContextAsync();
-        var open = await db.Tasks.CountAsync(t => t.ChannelId == channelId && t.Status != WorkStatus.Done && t.Status != WorkStatus.Failed);
-        var openByAgents = (await db.Tasks.Where(t => t.ChannelId == channelId && t.Status != WorkStatus.Done && t.Status != WorkStatus.Failed)
+        var open = await db.Tasks.CountAsync(t => t.ChannelId == channelId && t.Status != WorkStatus.Done && t.Status != WorkStatus.Failed && t.Status != WorkStatus.Closed);
+        var openByAgents = (await db.Tasks.Where(t => t.ChannelId == channelId && t.Status != WorkStatus.Done && t.Status != WorkStatus.Failed && t.Status != WorkStatus.Closed)
             .Select(t => t.CreatedBy).ToListAsync()).Count(agents.Contains);
         if (openByAgents >= maxOpen) return null;
         var t = new TaskEntity
@@ -456,15 +526,32 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     }
 
     // Dall'utente: "Fatto" sui task umani, "Riapri" su qualsiasi task (un task di agente riaperto torna in coda).
+    public async Task<List<TaskDto>> GetAllTasksAsync(string user)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        var visible = ChannelVisibility.Visible(db, user);
+        // shortcut: gli ultimi 500 aggiornati; oltre servirebbe la paginazione lato server.
+        return (await db.Tasks.Where(t => visible.Any(c => c.Id == t.ChannelId)).OrderByDescending(t => t.UpdatedAt).Take(500).ToListAsync())
+            .Select(ToDto).ToList();
+    }
+
     public async Task SetStatusByUserAsync(int taskId, WorkStatus status, string user)
     {
         await using var db = await dbf.CreateDbContextAsync();
         var t = await db.Tasks.FindAsync(taskId);
         if (t is null || !await ChannelVisibility.CanAccessAsync(db, t.ChannelId, user)) throw new KeyNotFoundException($"Task #{taskId} inesistente.");
-        if (status == WorkStatus.Done && t.AssigneeIsAgent) throw new ArgumentException("I task degli agenti si chiudono da soli.");
-        if (status is not (WorkStatus.Done or WorkStatus.Todo)) throw new ArgumentException("Stato non consentito.");
+        if (status == t.Status) return;
+        if (status == WorkStatus.Failed) throw new ArgumentException("Stato non consentito.");
+        // Gli agenti gestiscono da soli "In corso" e "Fatto"; mentre ci lavorano il task non si sposta.
+        if (t.AssigneeIsAgent && status is WorkStatus.InProgress or WorkStatus.Done) throw new ArgumentException("I task degli agenti si chiudono da soli.");
+        if (t.AssigneeIsAgent && t.Status == WorkStatus.InProgress) throw new ArgumentException($"{t.Assignee} ci sta lavorando: aspetta che finisca.");
         await SaveStatusAsync(db, t, status, status == WorkStatus.Todo ? null : t.Result);
-        await PostAsync(t.ChannelId, "Sistema", AuthorKind.System, $"{user} ha {(status == WorkStatus.Done ? "completato" : "riaperto")} il task #{t.Id}.");
+        var verb = status switch
+        {
+            WorkStatus.Done => "completato", WorkStatus.Todo => "riaperto", WorkStatus.InProgress => "iniziato",
+            WorkStatus.Backlog => "spostato nel backlog", _ => "chiuso",
+        };
+        await PostAsync(t.ChannelId, "Sistema", AuthorKind.System, $"{user} ha {verb} il task #{t.Id}.");
         if (status == WorkStatus.Todo && t.AssigneeIsAgent) queue.Enqueue(new(t.ChannelId, t.Assignee!, t.Id, 0));
     }
 
@@ -491,7 +578,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     public async Task<List<TaskEntity>> RecoverAgentTasksAsync()
     {
         await using var db = await dbf.CreateDbContextAsync();
-        await db.Tasks.Where(t => t.Status == WorkStatus.InProgress).ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, WorkStatus.Todo));
+        await db.Tasks.Where(t => t.AssigneeIsAgent && t.Status == WorkStatus.InProgress).ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, WorkStatus.Todo));
         return await db.Tasks.Where(t => t.AssigneeIsAgent && t.Status == WorkStatus.Todo).OrderBy(t => t.Id).ToListAsync();
     }
 

@@ -37,6 +37,8 @@ public sealed class ChannelEntity
     public DateTimeOffset CreatedAt { get; set; }
     public bool IsPrivate { get; set; } // privato: lo vedono solo i membri (ChannelVisibility), nemmeno gli admin
     public string? CreatedBy { get; set; } // chi l'ha creato: è l'unico che sceglie gli agenti del canale
+    // Messaggio diretto: "alice@x|bob@y" (persone in ordine) oppure "alice@x|agent:Cindy". Unico: una sola conversazione per coppia.
+    public string? DirectKey { get; set; }
 }
 
 // Agenti del canale: solo loro rispondono alle @menzioni, ricevono task e si delegano lavoro in questo canale.
@@ -182,6 +184,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         b.Entity<PushDeviceEntity>().Property(d => d.Kind).HasMaxLength(10);
         b.Entity<PushDeviceEntity>().Property(d => d.Token).HasMaxLength(1000);
         b.Entity<ChannelEntity>().HasIndex(c => c.Name).IsUnique();
+        b.Entity<ChannelEntity>().HasIndex(c => c.DirectKey).IsUnique();
         b.Entity<MessageEntity>().HasIndex(m => m.ChannelId);
         b.Entity<MessageEntity>().HasIndex(m => new { m.ChannelId, m.Author, m.ClientId }).IsUnique().HasFilter("\"ClientId\" IS NOT NULL");
         b.Entity<MessageEntity>().HasIndex(m => m.ParentId).HasFilter("\"ParentId\" IS NOT NULL");
