@@ -4,7 +4,7 @@ using AgentWeb.Shared.Agents;
 namespace AgentWeb.Web;
 
 // shortcut: file JSON in chiaro (token inclusi) nella content root; per produzione passare a user-secrets/Key Vault.
-public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration config, DaemonBroker daemons) : IAgentSettingsService
+public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration config, DaemonBroker daemons, AgentIcons icons) : IAgentSettingsService
 {
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     readonly string path = config["AgentSettings:Path"] ?? Path.Combine(env.ContentRootPath, "agentsettings.json");
@@ -33,6 +33,7 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
             File.WriteAllText(tmp, JsonSerializer.Serialize(settings, Json));
             File.Move(tmp, path, overwrite: true); // scrittura atomica: niente file troncato se il processo cade
         }
+        icons.For(settings.LocalAgents.Where(a => a.Enabled)); // agenti nuovi: l'icona si disegna subito, in background
     }
 
     public Task<AgentSettingsView> GetAsync(CancellationToken ct = default) => Task.FromResult(new AgentSettingsView(Get(), AllowStdio));

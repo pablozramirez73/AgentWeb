@@ -30,7 +30,7 @@ public sealed class AgentQueue
 
 // Metodi con parametro "user": chiamati per conto di una persona, passano da ChannelVisibility.
 // PostAsync/StartTaskAsync/FinishTaskAsync: autorità interna del server (agenti e messaggi di sistema).
-public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, WorkspaceBus bus, AgentQueue queue, AgentSettingsStore settings, MemoryStore memory, IConfiguration config)
+public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, WorkspaceBus bus, AgentQueue queue, AgentSettingsStore settings, MemoryStore memory, IConfiguration config, AgentIcons icons)
 {
     const int MaxMentionDepth = 3;          // agente che menziona agente: massimo 3 salti, niente loop infiniti
     public const int NoMentions = MaxMentionDepth; // depth per messaggi le cui @menzioni non devono attivare agenti (deleghe)
@@ -227,6 +227,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     }
 
     public Task<List<string>> GetAgentsAsync() => Task.FromResult(settings.Get().EnabledAgentNames().ToList());
+    public Task<Dictionary<string, string>> GetAgentIconsAsync() => Task.FromResult(icons.For(settings.Get().LocalAgents.Where(a => a.Enabled)));
 
     // Memoria del canale vista dalle persone: chi vede il canale la consulta e carica documenti;
     // cancella chi ha creato l'elemento o il canale.

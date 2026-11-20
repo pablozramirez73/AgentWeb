@@ -76,6 +76,7 @@ public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus,
     public async Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task) => await store.CreateTaskAsync(channelId, task, await UserAsync());
     public async Task SetTaskStatusAsync(int taskId, WorkStatus status) => await store.SetStatusByUserAsync(taskId, status, await UserAsync());
     public Task<List<string>> GetAgentsAsync() => store.GetAgentsAsync();
+    public Task<Dictionary<string, string>> GetAgentIconsAsync() => store.GetAgentIconsAsync();
 
     public void Dispose() => bus.Published -= Forward;
 }

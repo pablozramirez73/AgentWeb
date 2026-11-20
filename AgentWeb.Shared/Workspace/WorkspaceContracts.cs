@@ -87,6 +87,7 @@ public interface IWorkspaceClient
     Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task);
     Task SetTaskStatusAsync(int taskId, WorkStatus status);
     Task<List<string>> GetAgentsAsync();
+    Task<Dictionary<string, string>> GetAgentIconsAsync(); // nome agente -> SVG quadrato (da mostrare solo come <img>)
 }
 
 // Sessioni dell'utente (una per login: web, app, CLI). Revocarne una la chiude subito ovunque.

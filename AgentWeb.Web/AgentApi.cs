@@ -83,6 +83,7 @@ public static class AgentApi
             return Results.NoContent();
         });
         ws.MapGet("/agents", (WorkspaceStore s) => s.GetAgentsAsync());
+        ws.MapGet("/agents/icons", (WorkspaceStore s) => s.GetAgentIconsAsync());
 
         var settings = app.MapGroup("/api/settings").RequireAuthorization(AccountEndpoints.AdminRole);
         settings.MapGet("", (AgentSettingsStore store) => store.GetAsync());

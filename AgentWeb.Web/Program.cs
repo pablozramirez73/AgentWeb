@@ -92,6 +92,7 @@ builder.Services.AddSingleton<DaemonBroker>();   // lavoro degli agenti "daemon"
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DaemonBroker>()); // scadenza dei lease
 builder.Services.AddSingleton<AgentSettingsStore>();
 builder.Services.AddSingleton<LlmClients>();
+builder.Services.AddSingleton<AgentIcons>();
 builder.Services.AddSingleton<MemoryStore>();   // memoria semantica (pgvector + embedding locale)
 builder.Services.AddSingleton<SafeFetch>();     // fetch_url sicuro per gli agenti
 builder.Services.AddSingleton<NativeTools>();

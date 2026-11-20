@@ -97,7 +97,7 @@
             <div class="agents-bar">
                 @foreach (var a in channelAgents.Agents)
                 {
-                    <span class="chip chip-agent"><span class="avatar avatar-agent" style="--size: 1.25rem">✦</span>@a
+                    <span class="chip chip-agent">@AgentAvatar(a, "1.25rem")@a
                         @if (channelAgents.CanManage)
                         {
                             <button type="button" class="chip-x" title="Togli @a dal canale" aria-label="Togli @a" @onclick="() => RemoveAgentAsync(a)">✕</button>
@@ -157,7 +157,7 @@
                         }
                         @foreach (var a in typing)
                         {
-                            <div class="typing fade-in"><span class="avatar avatar-agent" style="--size: 1.5rem">✦</span>@a sta lavorando <span class="typing-dots"><i></i><i></i><i></i></span></div>
+                            <div class="typing fade-in">@AgentAvatar(a, "1.5rem")@a sta lavorando <span class="typing-dots"><i></i><i></i><i></i></span></div>
                         }
                         @foreach (var p in peopleTyping.Keys)
                         {
@@ -329,7 +329,8 @@
                 }
                 else
                 {
-                    <span class="avatar @(x.M.Kind == AuthorKind.Agent ? "avatar-agent" : "")" aria-hidden="true">@(x.M.Kind == AuthorKind.Agent ? "✦" : Initials(x.M.Author))</span>
+                    @if (x.M.Kind == AuthorKind.Agent) { @AgentAvatar(x.M.Author, "2rem") }
+                    else { <span class="avatar" aria-hidden="true">@Initials(x.M.Author)</span> }
                 }
                 <div class="msg-body">
                     @if (!x.Grouped)
@@ -379,6 +380,7 @@
             ChannelList ??= await Ws.GetChannelsAsync();
             Me ??= await Ws.WhoAmIAsync();
         });
+        await LoadIconsAsync();
     }
 
     protected override async Task OnParametersSetAsync()
@@ -386,6 +388,7 @@
         if (loadedChannel == ChannelId) return;
         loadedChannel = ChannelId;
         current = ChannelList?.FirstOrDefault(c => c.Id == ChannelId);
+        _ = LoadIconsAsync(); // a ogni cambio di canale: le icone appena disegnate sostituiscono quelle provvisorie
         typing.Clear(); peopleTyping.Clear(); tab = "msg"; memoryItems = null; replyTo = null; lastMarked = 0; searchResults = null;
         await Run(async () =>
         {
@@ -615,6 +618,25 @@
         try { await action(); }
         catch (Exception ex) { error = ex.GetBaseException().Message; }
     }
+
+    Dictionary<string, string> agentIcons = new(StringComparer.OrdinalIgnoreCase); // nome -> data URI
+
+    async Task LoadIconsAsync()
+    {
+        try { agentIcons = (await Ws.GetAgentIconsAsync()).ToDictionary(i => i.Key, i => "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(i.Value)), StringComparer.OrdinalIgnoreCase); StateHasChanged(); }
+        catch (Exception) { } // senza icone restano i simboli: non è un errore da mostrare
+    }
+
+    // SVG come data URI dentro <img>: il browser non esegue script né carica risorse esterne.
+    RenderFragment AgentAvatar(string name, string size) =>
+        @<span class="avatar avatar-agent @(agentIcons.ContainsKey(name) ? "avatar-icon" : "")" style="--size: @size" aria-hidden="true">@if (agentIcons.TryGetValue(name, out var src))
+        {
+            <img src="@src" alt="" />
+        }
+        else
+        {
+            <text>✦</text>
+        }</span>;
 
     static string Initials(string user)
     {

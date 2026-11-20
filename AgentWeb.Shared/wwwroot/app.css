@@ -219,6 +219,8 @@ hr { border-color: var(--border); opacity: 1; }
     font-size: calc(var(--size) * .38); font-weight: 650; letter-spacing: .02em; text-transform: uppercase;
 }
 .avatar-agent { background: var(--ink); color: var(--ink-contrast); }
+.avatar-icon { border-radius: 24%; overflow: hidden; background: transparent; }
+.avatar-icon img { width: 100%; height: 100%; display: block; }
 .avatar-system { background: transparent; color: var(--muted); border: 1px dashed var(--border-strong); }
 
 /* Indicatore "sta scrivendo" */
