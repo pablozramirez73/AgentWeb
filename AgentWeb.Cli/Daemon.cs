@@ -130,6 +130,8 @@ public static class Daemon
     // init/launchd e pgrep -P non li troverebbe più. Poi il tree kill, che senza asUser basta da solo.
     static void Kill(Process process, string? asUser)
     {
+        // Già uscito (fine normale) o già rilasciato: niente da fermare, e pgrep -P non troverebbe più i figli.
+        try { if (process.HasExited) return; } catch (InvalidOperationException) { return; }
         if (asUser is not null)
         {
             var killer = new ProcessStartInfo("/usr/bin/sudo") { UseShellExecute = false, RedirectStandardError = true };
@@ -147,7 +149,8 @@ public static class Daemon
         using var process = new Process { StartInfo = StartInfo(rt, passEnv, asUser) };
         try { process.Start(); }
         catch (Exception ex) { return new(null, $"impossibile avviare {rt.File}: {ex.Message}"); }
-        using var kill = run.Token.Register(() => Kill(process, asUser));
+        // Fuori dal callback: Cancel() esegue le registrazioni in fila, e il kill via sudo può attendere fino a 5 s per processo.
+        using var kill = run.Token.Register(() => _ = Task.Run(() => Kill(process, asUser)));
 
         var stdout = ReadCappedAsync(process.StandardOutput);
         var stderr = ReadCappedAsync(process.StandardError);

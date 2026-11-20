@@ -113,6 +113,8 @@ builder.Services.AddScoped<IAgentSettingsService, LocalAgentSettingsService>();
 
 // Compressione delle risposte: zstd (RFC 8878) per chi lo accetta, poi Brotli e Gzip (default di ASP.NET Core 11).
 // Niente su HTTPS (EnableForHttps resta false): con cookie e token nelle pagine si apre BREACH.
+// Dietro un proxy TLS (Caddy) IsHttps è vero solo con ASPNETCORE_FORWARDEDHEADERS_ENABLED=true (nel compose del VPS);
+// e il proxy stesso non deve comprimere l'HTML (Caddy: encode solo per css/js/wasm/svg/font).
 builder.Services.AddResponseCompression();
 
 var app = builder.Build();

@@ -3,6 +3,7 @@
 #   poi avvia AgentWeb con:  OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 #   Grafana: http://localhost:3000 (admin / admin al primo accesso) → Explore: Prometheus, Loki, Tempo, Pyroscope.
 #   Profiling (solo immagine Docker Linux, non su macOS): docker run -e CORECLR_ENABLE_PROFILING=1 -e PYROSCOPE_PROFILING_ENABLED=1
+#     -e LD_PRELOAD=/pyroscope/Pyroscope.Linux.ApiWrapper.x64.so
 #     -e PYROSCOPE_SERVER_ADDRESS=http://host.docker.internal:4040 ... → Grafana → Drilldown → Profiles, servizio "agentweb".
 # Metriche di AgentWeb: agentweb_agent_runs_total, agentweb_agent_duration_seconds, agentweb_agent_running,
 # gen_ai_client_token_usage (token per modello), http_server_request_duration_seconds, più runtime .NET e Npgsql.

@@ -211,42 +211,54 @@ public sealed class WorkspaceHub(WorkspaceStore store, SessionConnections connec
 }
 
 // Inoltra gli eventi del workspace ai client SignalR, rispettando la visibilità (con Redis anche alle altre repliche).
-// Un solo consumatore: gli eventi escono nell'ordine in cui sono stati pubblicati, anche se l'instradamento interroga il database.
+// Una coda per gruppo di canali (hash dell'id): l'ordine resta per canale anche se l'instradamento interroga il database,
+// e un canale lento non ferma gli altri. Code limitate e invii con timeout: un DB o un backplane bloccato non riempie la memoria.
 public sealed class WorkspaceHubBridge(WorkspaceBus bus, IHubContext<WorkspaceHub> hub, WorkspaceStore store, ILogger<WorkspaceHubBridge> log) : BackgroundService
 {
-    readonly System.Threading.Channels.Channel<WorkspaceEvent> queue = System.Threading.Channels.Channel.CreateUnbounded<WorkspaceEvent>(new() { SingleReader = true });
+    const int Lanes = 8;
+    static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(10);
+    readonly System.Threading.Channels.Channel<WorkspaceEvent>[] lanes = [.. Enumerable.Range(0, Lanes).Select(_ =>
+        System.Threading.Channels.Channel.CreateBounded<WorkspaceEvent>(new System.Threading.Channels.BoundedChannelOptions(10_000) { SingleReader = true }))];
 
-    void Enqueue(WorkspaceEvent e) => queue.Writer.TryWrite(e);
+    // Coda piena: l'evento si perde (i messaggi restano nel DB e i client li recuperano con WatchFrom), ma lo si dice.
+    void Enqueue(WorkspaceEvent e)
+    {
+        if (!lanes[(uint)e.ChannelId % Lanes].Writer.TryWrite(e)) log.LogWarning("Coda realtime piena: evento {Kind} del canale {Channel} scartato", e.Kind, e.ChannelId);
+    }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         bus.Published += Enqueue;
-        try
-        {
-            await foreach (var e in queue.Reader.ReadAllAsync(ct))
-            {
-                try { await SendAsync(e); }
-                catch (Exception ex) { log.LogWarning(ex, "Evento {Kind} non inoltrato", e.Kind); }
-            }
-        }
+        try { await Task.WhenAll(lanes.Select(l => DrainAsync(l.Reader, ct))); }
         catch (OperationCanceledException) { }
         finally { bus.Published -= Enqueue; }
     }
 
-    async Task SendAsync(WorkspaceEvent e)
+    async Task DrainAsync(System.Threading.Channels.ChannelReader<WorkspaceEvent> reader, CancellationToken ct)
+    {
+        await foreach (var e in reader.ReadAllAsync(ct))
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(SendTimeout);
+            try { await SendAsync(e, timeout.Token); }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { log.LogWarning(ex, "Evento {Kind} non inoltrato", e.Kind); }
+        }
+    }
+
+    async Task SendAsync(WorkspaceEvent e, CancellationToken ct)
     {
         if (e.Kind is not ("channel" or "message"))
         {
-            await hub.Clients.Group(WorkspaceHub.ChannelGroup(e.ChannelId)).SendAsync("event", e);
+            await hub.Clients.Group(WorkspaceHub.ChannelGroup(e.ChannelId)).SendAsync("event", e, ct);
             return;
         }
         // Solo chi può vedere il canale: i membri se privato, tutti gli autenticati se pubblico.
         var to = await store.PrivateMembersAsync(e.ChannelId) is { } members
             ? hub.Clients.Groups(members.Select(WorkspaceHub.UserGroup).ToList())
             : hub.Clients.All;
-        await to.SendAsync("event", e);
+        await to.SendAsync("event", e, ct);
         // shortcut: copia "activity" per le app MAUI già installate, che leggono i badge dei non letti solo da lì
         // (i client nuovi la ignorano). Da togliere quando quelle versioni non sono più in uso.
-        if (e.Kind == "message") await to.SendAsync("event", e with { Kind = "activity" });
+        if (e.Kind == "message") await to.SendAsync("event", e with { Kind = "activity" }, ct);
     }
 }
