@@ -383,6 +383,13 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         return await memory.ListChannelAsync(channelId);
     }
 
+    // Ricerca per significato nella memoria del canale (documenti e note), per chi vede il canale.
+    public async Task<List<MemoryHit>> SearchChannelMemoryAsync(int channelId, string user, string query, int take)
+    {
+        await using (var db = await dbf.CreateDbContextAsync()) await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
+        return await memory.SearchAsync("", channelId, Required(query, 500, "Ricerca"), take); // agente "": solo la memoria del canale
+    }
+
     public async Task<int> UploadDocumentAsync(int channelId, string user, string fileName, string text)
     {
         await using (var db = await dbf.CreateDbContextAsync()) await ChannelVisibility.EnsureAccessAsync(db, channelId, user);

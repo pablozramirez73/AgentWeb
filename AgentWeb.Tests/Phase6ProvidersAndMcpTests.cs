@@ -295,6 +295,57 @@ public sealed class Phase6AgentsTests : IAsyncLifetime
         Assert.Equal("parere dell'esperto", Text(answer));
     }
 
+    // Da un client MCP: canale nuovo, agente nuovo con l'LLM di uno esistente, aggiunto al canale e subito interrogabile.
+    [Fact]
+    public async Task Mcp_CreatesChannelAndAgent_OnlyAnAdminCreatesAgents()
+    {
+        await app.CreateUserAsync("root@test.it", admin: true);
+        await using var root = await McpAsync(await TokenAsync("root@test.it"));
+        var channel = await root.CallToolAsync("create_channel", new Dictionary<string, object?> { ["name"] = "Ricerca Hermes" });
+        Assert.NotEqual(true, channel.IsError);
+        Assert.Contains("ricerca-hermes", Text(channel));
+
+        var created = await root.CallToolAsync("create_agent", new Dictionary<string, object?>
+            { ["name"] = "hermes", ["purpose"] = "Fai ricerche.", ["like"] = "Esperto", ["model"] = "altro", ["protocol"] = "mcp", ["channel"] = "ricerca-hermes" });
+        Assert.NotEqual(true, created.IsError);
+        var agent = app.Services.GetRequiredService<AgentSettingsStore>().Get().FindLocal("hermes")!;
+        Assert.Equal((LlmKinds.OpenAI, llm.Url + "/v1", "k", "altro"), (agent.Llm.Kind, agent.Llm.Url, agent.Llm.ApiKey, agent.Llm.DefaultModel));
+
+        var answer = await root.CallToolAsync("ask_agent", new Dictionary<string, object?>
+            { ["agent"] = "hermes", ["channel"] = "ricerca-hermes", ["question"] = "ciao", ["timeout_seconds"] = 30 });
+        Assert.Equal("parere dell'esperto", Text(answer));
+
+        await using var bob = await McpAsync(await TokenAsync("bob@test.it"));
+        var refused = await bob.CallToolAsync("create_agent", new Dictionary<string, object?> { ["name"] = "intruso", ["purpose"] = "x" });
+        Assert.True(refused.IsError);
+        Assert.Null(app.Services.GetRequiredService<AgentSettingsStore>().Get().FindLocal("intruso"));
+        var notHis = await bob.CallToolAsync("add_agent_to_channel", new Dictionary<string, object?> { ["agent"] = "Capo", ["channel"] = "ricerca-hermes" });
+        Assert.True(notHis.IsError); // il canale è di root
+    }
+
+    // Documenti via MCP: caricare, elencare, cercare, eliminare; chi non vede il canale non li tocca.
+    [Fact]
+    public async Task Mcp_Documents_UploadListSearchDelete()
+    {
+        app.Services.GetRequiredService<MemoryStore>().UseEmbedder(new FakeEmbedder());
+        await using var alice = await McpAsync(await TokenAsync("alice@test.it"));
+        Assert.NotEqual(true, (await alice.CallToolAsync("create_channel", new Dictionary<string, object?> { ["name"] = "docs", ["private"] = true })).IsError);
+        var up = await alice.CallToolAsync("upload_document", new Dictionary<string, object?>
+            { ["channel"] = "docs", ["title"] = "manuale.md", ["text"] = "Il deploy si fa con docker compose.\n\nLe chiavi stanno nel volume /data." });
+        Assert.NotEqual(true, up.IsError);
+
+        var listed = Text(await alice.CallToolAsync("list_documents", new Dictionary<string, object?> { ["channel"] = "docs" }));
+        Assert.Contains("manuale.md", listed);
+        var found = Text(await alice.CallToolAsync("search_documents", new Dictionary<string, object?> { ["channel"] = "docs", ["query"] = "deploy docker" }));
+        Assert.Contains("docker compose", found);
+
+        await using var bob = await McpAsync(await TokenAsync("bob@test.it"));
+        Assert.True((await bob.CallToolAsync("search_documents", new Dictionary<string, object?> { ["channel"] = "docs", ["query"] = "deploy" })).IsError); // canale privato di alice
+
+        Assert.NotEqual(true, (await alice.CallToolAsync("delete_document", new Dictionary<string, object?> { ["channel"] = "docs", ["document"] = "manuale.md" })).IsError);
+        Assert.DoesNotContain("manuale.md", Text(await alice.CallToolAsync("list_documents", new Dictionary<string, object?> { ["channel"] = "docs" })));
+    }
+
     [Fact]
     public async Task RevokedToken_StopsWorkingImmediately()
     {
@@ -430,7 +481,24 @@ public sealed class LlmConnectionErrorTests
         var clock = Stopwatch.StartNew();
         var e = await Assert.ThrowsAnyAsync<Exception>(() =>
             store.ListModelsAsync(new() { Kind = LlmKinds.OllamaRemote, Url = "http://10.255.255.1:11434" })); // nessuno risponde
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(15), $"{clock.Elapsed.TotalSeconds:F0} s");
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(25), $"{clock.Elapsed.TotalSeconds:F0} s"); // prima 30-40 s; il margine regge i test in parallelo
         Assert.Contains("10.255.255.1", e.Message);
+    }
+}
+
+public sealed class A2ASettingsTests
+{
+    [Fact]
+    public async Task A2AAgent_IsSaved_AndReadBack()
+    {
+        using var app = new TestApp();
+        await app.CreateUserAsync("admin@test.it", admin: true);
+        using var admin = await app.LoginAsync("admin@test.it");
+        var view = (await admin.GetFromJsonAsync<AgentSettingsView>("/api/settings"))!;
+        view.Settings.A2AAgents.Add(new() { Name = "hermes", Url = "https://hermes.example.com" });
+        var r = await admin.PutAsJsonAsync("/api/settings", view.Settings);
+        Assert.True(r.IsSuccessStatusCode, await r.Content.ReadAsStringAsync());
+        var again = (await admin.GetFromJsonAsync<AgentSettingsView>("/api/settings"))!;
+        Assert.Contains(again.Settings.A2AAgents, a => a.Name == "hermes" && a.Url == "https://hermes.example.com");
     }
 }

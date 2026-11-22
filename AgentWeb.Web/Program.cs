@@ -77,7 +77,7 @@ builder.Services.AddAuthentication().AddScheme<Microsoft.AspNetCore.Authenticati
 builder.Services.AddAuthorizationBuilder().AddPolicy("mcp", p => p
     .AddAuthenticationSchemes(ApiTokenAuthenticationHandler.Scheme, IdentityConstants.BearerScheme)
     .RequireAuthenticatedUser());
-builder.Services.AddMcpServer(o => o.ServerInfo = new() { Name = "agentweb", Version = "0.6.0" })
+builder.Services.AddMcpServer(o => o.ServerInfo = new() { Name = "agentweb", Version = "0.7.0" })
     .WithHttpTransport(o => o.Stateless = true) // ogni richiesta porta il suo token: niente sessioni MCP da tenere in memoria
     .WithTools<AgentWebMcpTools>();
 builder.Services.AddA2AExposure(); // agenti con protocollo A2A su /a2a/<nome>

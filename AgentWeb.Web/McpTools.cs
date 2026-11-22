@@ -97,6 +97,89 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         finally { bus.Published -= OnEvent; }
     });
 
+    [McpServerTool(Name = "create_channel"), Description("Crea un canale (ne diventi il creatore: solo tu scegli i suoi agenti). Restituisce id e nome.")]
+    public Task<ChannelDto> CreateChannel(
+        [Description("Nome del canale (spazi diventano trattini)")] string name,
+        [Description("true = privato, lo vedono solo i membri (default false)")] bool @private = false) =>
+        Run(() => store.CreateChannelAsync(name, User, @private));
+
+    [McpServerTool(Name = "add_agent_to_channel"), Description("Aggiunge un agente AgentWeb a un canale che hai creato: da lì risponde alle @menzioni e svolge i task.")]
+    public Task<string> AddAgentToChannel([Description("Nome dell'agente")] string agent, [Description("Id o nome del canale")] string channel) => Run(async () =>
+    {
+        await store.AddChannelAgentAsync(await ChannelAsync(channel), User, agent);
+        return $"{agent.TrimStart('@')} è un agente del canale {channel}.";
+    });
+
+    // Solo amministratori, e niente URL o chiavi via MCP: il nuovo agente usa l'LLM (server e token) di un agente già configurato.
+    // shortcut: legge e riscrive le impostazioni intere; un salvataggio contemporaneo dalla pagina Agenti può sovrascriverlo.
+    [McpServerTool(Name = "create_agent"), Description("Solo amministratori. Crea un agente AgentWeb che usa lo stesso LLM di un agente esistente (eventualmente con un altro modello).")]
+    public Task<string> CreateAgent(
+        [Description("Nome (lettere, numeri, _ e -): si menziona con @nome")] string name,
+        [Description("Scopo dell'agente: diventa il suo system prompt")] string purpose,
+        [Description("Agente esistente di cui usare l'LLM (default: il primo agente abilitato)")] string? like = null,
+        [Description("Modello diverso da quello dell'agente copiato (facoltativo)")] string? model = null,
+        [Description("'internal' (default), 'mcp' (chiamabile con ask_agent) oppure 'a2a'")] string protocol = AgentProtocols.Internal,
+        [Description("Canale (id o nome) a cui aggiungerlo subito, se l'hai creato tu (facoltativo)")] string? channel = null) => Run(async () =>
+    {
+        if (http.HttpContext?.User.IsInRole(AccountEndpoints.AdminRole) != true) throw new McpException("Solo un amministratore può creare agenti.");
+        var s = settings.Get();
+        var source = (like is null ? s.LocalAgents.FirstOrDefault(a => a.Enabled) : s.FindLocal(like.TrimStart('@')))
+            ?? throw new McpException(like is null ? "Nessun agente esistente da cui copiare l'LLM: creane uno dalla pagina Agenti." : $"Agente \"{like}\" inesistente o disabilitato.");
+        if (AgentProtocols.All.All(x => x.Value != protocol)) throw new McpException("protocol deve essere 'internal', 'mcp' o 'a2a'.");
+        var src = source.Llm;
+        s.LocalAgents.Add(new()
+        {
+            Name = name.Trim().TrimStart('@'), Prompt = purpose.Trim(), Protocol = protocol, Tools = [.. AgentTools.Defaults],
+            Llm = new() { Kind = src.Kind, Url = src.Url, ApiKey = src.ApiKey, DefaultModel = string.IsNullOrWhiteSpace(model) ? src.DefaultModel : model.Trim() },
+        });
+        if (s.Validate(settings.AllowStdio) is { Count: > 0 } errors) throw new McpException(string.Join(" ", errors));
+        settings.Save(s);
+        var created = s.LocalAgents[^1];
+        if (channel is not null) await store.AddChannelAgentAsync(await ChannelAsync(channel), User, created.Name);
+        return $"Agente {created.Name} creato (LLM di {source.Name}, modello {created.Llm.DefaultModel})" + (channel is null ? "." : $" e aggiunto al canale {channel}.");
+    });
+
+    // Documenti: la memoria del canale che gli agenti consultano (stessi permessi della pagina Memoria del canale).
+    [McpServerTool(Name = "list_documents", ReadOnly = true), Description("Elenca i documenti caricati nella memoria di un canale (id, titolo, autore, parti).")]
+    public Task<List<string>> ListDocuments([Description("Id o nome del canale")] string channel) => Run(async () =>
+        (await store.GetChannelMemoryAsync(await ChannelAsync(channel), User)).Where(m => m.Kind == "document")
+            .Select(d => $"{d.SourceId}: «{d.Title}» di {d.CreatedBy}, {d.CreatedAt:yyyy-MM-dd}, {d.Chunks} parti").ToList());
+
+    [McpServerTool(Name = "upload_document"), Description("Carica un documento di testo (anche Markdown) nella memoria di un canale: gli agenti del canale lo useranno per rispondere.")]
+    public Task<string> UploadDocument(
+        [Description("Id o nome del canale")] string channel,
+        [Description("Titolo o nome del file")] string title,
+        [Description("Testo del documento (massimo circa 1 MB)")] string text) => Run(async () =>
+    {
+        var parts = await store.UploadDocumentAsync(await ChannelAsync(channel), User, title, text);
+        return $"«{title}» caricato nella memoria del canale ({parts} parti).";
+    });
+
+    [McpServerTool(Name = "search_documents", ReadOnly = true), Description("Cerca per significato nei documenti e nelle note della memoria di un canale; restituisce i passaggi più pertinenti.")]
+    public Task<List<string>> SearchDocuments(
+        [Description("Id o nome del canale")] string channel,
+        [Description("Cosa cerchi, in parole tue")] string query,
+        [Description("Quanti passaggi al massimo (1-20, default 5)")] int limit = 5) => Run(async () =>
+        (await store.SearchChannelMemoryAsync(await ChannelAsync(channel), User, query, Math.Clamp(limit, 1, 20)))
+            .Select(h => $"[{h.Title ?? h.Kind}] {h.Content}").ToList());
+
+    [McpServerTool(Name = "delete_document"), Description("Elimina un documento dalla memoria di un canale. Può farlo chi l'ha caricato o chi ha creato il canale.")]
+    public Task<string> DeleteDocument([Description("Id o nome del canale")] string channel, [Description("Id del documento (vedi list_documents) o titolo esatto")] string document) => Run(async () =>
+    {
+        var id = await ChannelAsync(channel);
+        var docs = (await store.GetChannelMemoryAsync(id, User)).Where(m => m.Kind == "document").ToList();
+        var matches = docs.Where(d => d.SourceId == document).ToList() is { Count: > 0 } byId ? byId
+            : docs.Where(d => string.Equals(d.Title, document, StringComparison.OrdinalIgnoreCase)).ToList();
+        var doc = matches switch
+        {
+            [var one] => one,
+            [] => throw new McpException($"Documento «{document}» inesistente in questo canale (vedi list_documents)."),
+            _ => throw new McpException($"Più documenti si chiamano «{document}»: indica l'id (vedi list_documents)."),
+        };
+        await store.DeleteChannelMemoryAsync(id, User, doc.Id, doc.SourceId);
+        return $"«{doc.Title}» eliminato.";
+    });
+
     async Task<int> ChannelAsync(string channel)
     {
         if (int.TryParse(channel, out var id)) return id;
@@ -111,5 +194,7 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         try { return await action(); }
         catch (KeyNotFoundException ex) { throw new McpException(ex.Message); }
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
+        catch (UnauthorizedAccessException ex) { throw new McpException(ex.Message); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
     }
 }
