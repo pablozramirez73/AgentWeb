@@ -352,8 +352,9 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
                     resumed = task.Agent;
                 }
             }
+            // Se la risposta ha appena ripreso un task di quell'agente, il task basta: niente seconda risposta di chat.
             if (kind == AuthorKind.User && await DirectAgentAsync(channelId) is { } direct && inChannel.Contains(direct, StringComparer.OrdinalIgnoreCase)
-                && !Mentions(text).Contains(direct, StringComparer.OrdinalIgnoreCase))
+                && !direct.Equals(resumed, StringComparison.OrdinalIgnoreCase) && !Mentions(text).Contains(direct, StringComparer.OrdinalIgnoreCase))
                 queue.Enqueue(new(channelId, direct, null, depth + 1, parentId, dto.Id)); // in un messaggio diretto con un agente non serve la @menzione
             foreach (var agent in Mentions(text).Where(a => !a.Equals(author, StringComparison.OrdinalIgnoreCase) && !a.Equals(resumed, StringComparison.OrdinalIgnoreCase)))
             {

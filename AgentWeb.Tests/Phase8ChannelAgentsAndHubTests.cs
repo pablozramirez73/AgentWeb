@@ -306,6 +306,32 @@ public sealed class TaskHandBackTests
         Assert.Contains(messages, m => m.ParentId == t.MessageId && m.Text == $"Lo prendo io come task #{t.Id}.\npreparo la mappa dei moduli");
     }
 
+    // DM con l'agente: rispondere nel thread di un suo task riprende il task, e basta (niente risposta di chat in più).
+    [Fact]
+    public async Task DirectMessage_ReplyInTaskThread_RunsTheAgentOnce()
+    {
+        await using var llm = await FakeLlm.StartAsync("Fatto.");
+        using var app = new TestApp();
+        var settings = new AgentSettings { LocalAgents = [new() { Name = "Cindy", Prompt = "Ricerche.", Llm = new() { Kind = LlmKinds.OpenAI, Url = llm.Url + "/v1", ApiKey = "k", DefaultModel = "m" } }] };
+        await File.WriteAllTextAsync(Path.Combine(app.Dir, "agentsettings.json"), JsonSerializer.Serialize(settings));
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var dm = (await (await alice.PostAsJsonAsync("/api/workspace/direct", new { name = "Cindy" })).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        var t = (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{dm}/tasks/from-text", new { text = "scrivi il report" })).Content.ReadFromJsonAsync<TaskDto>())!;
+        Assert.Equal("Cindy", t.Agent);
+
+        int Calls() { lock (llm.Requests) return llm.Requests.Count; }
+        async Task<int> SettledAsync(int atLeast)
+        {
+            for (var i = 0; i < 100 && Calls() < atLeast; i++) await Task.Delay(100);
+            await Task.Delay(1500); // eventuali chiamate in più arrivano entro questo margine
+            return Calls();
+        }
+        var afterTask = await SettledAsync(1);
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{dm}/messages", new NewMessageRequest("aggiungi i grafici", ParentId: t.MessageId))).EnsureSuccessStatusCode();
+        Assert.Equal(afterTask + 1, await SettledAsync(afterTask + 1));
+    }
+
     // In un messaggio diretto con l'agente non c'è la @menzione: la richiesta è il messaggio che l'ha attivato.
     [Fact]
     public async Task DirectMessage_RealWork_BecomesATask_NotARawMarker()
