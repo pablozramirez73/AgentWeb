@@ -74,6 +74,7 @@
   <!-- Notifiche APNs: servono un account Apple Developer a pagamento e un profilo con Push Notifications. dotnet build -p:ApnsPush=true -->
   <PropertyGroup Condition="'$(ApnsPush)' == 'true' And $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
     <CodesignEntitlements>Platforms/iOS/Entitlements.Push.plist</CodesignEntitlements>
+    <DefineConstants>$(DefineConstants);APNS_PUSH</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="AgentWebServer" Value="$(AgentWebServer)" />

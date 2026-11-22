@@ -59,6 +59,7 @@ builder.Services.AddDataProtection().SetApplicationName("AgentWeb").PersistKeysT
     "dataprotection-keys")));
 builder.Services.AddIdentityApiEndpoints<AppUser>()
     .AddRoles<IdentityRole>()
+    .AddErrorDescriber<ItalianIdentityErrors>()
     .AddEntityFrameworkStores<AppDb>();
 builder.Services.ConfigureApplicationCookie(o => o.LoginPath = "/login");
 builder.Services.AddAuthorizationBuilder().AddPolicy(AccountEndpoints.AdminRole, p => p.RequireRole(AccountEndpoints.AdminRole));

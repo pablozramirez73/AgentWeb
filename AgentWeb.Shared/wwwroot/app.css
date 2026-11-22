@@ -230,6 +230,7 @@ hr { border-color: var(--border); opacity: 1; }
 .list-group { --bs-list-group-bg: var(--surface); --bs-list-group-border-color: var(--border); --bs-list-group-border-radius: var(--radius); --bs-list-group-color: var(--text); }
 .alert { border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); }
 .alert-danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); color: var(--danger); background: color-mix(in srgb, var(--danger) 6%, var(--surface)); }
+.alert-success { border-color: color-mix(in srgb, var(--success) 40%, var(--border)); color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--surface)); }
 .alert-warning { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); background: color-mix(in srgb, var(--warning) 10%, var(--surface)); color: var(--text); }
 .alert-info, .alert-primary { border-color: color-mix(in srgb, var(--ink) 35%, var(--border)); background: var(--ink-soft); color: var(--text); }
 .badge { font-weight: 560; letter-spacing: .01em; border-radius: 999px; padding: .3em .65em; }

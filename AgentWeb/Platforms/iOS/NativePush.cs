@@ -12,7 +12,13 @@ sealed class NativePush : IDevicePush
     static TaskCompletionSource<string>? pending;
 
     public string Kind => "apns";
+    // Senza l'entitlement aps-environment (build senza -p:ApnsPush=true, es. firma con account gratuito) iOS non risponde mai:
+    // meglio dire subito che qui le notifiche non ci sono.
+#if APNS_PUSH
     public Task<bool> SupportedAsync() => Task.FromResult(true);
+#else
+    public Task<bool> SupportedAsync() => Task.FromResult(false);
+#endif
     public Task<PushDeviceRequest?> CurrentAsync() => Task.FromResult(Preferences.Get(Token, null) is { } t ? new PushDeviceRequest(Kind, t) : null);
 
     public async Task<PushDeviceRequest?> SubscribeAsync(PushConfigDto config)
@@ -22,7 +28,9 @@ sealed class NativePush : IDevicePush
         if (!granted) return null;
         pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
         await MainThread.InvokeOnMainThreadAsync(UIApplication.SharedApplication.RegisterForRemoteNotifications);
-        var token = await pending.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        string token;
+        try { token = await pending.Task.WaitAsync(TimeSpan.FromSeconds(30)); }
+        catch (TimeoutException) { throw new InvalidOperationException("iOS non ha risposto alla registrazione delle notifiche: controlla la connessione e riprova."); }
         Preferences.Set(Token, token);
         return new(Kind, token);
     }

@@ -48,6 +48,7 @@
         : device is not null ? "Attive su questo dispositivo."
         : available ? "Non attive su questo dispositivo."
         : Device.Kind == "web" ? "Questo browser non supporta le notifiche push. Su iPhone e iPad: prima \"Aggiungi alla schermata Home\", poi apri AgentWeb da lì."
+        : config?.Kinds.Contains(Device.Kind) == true ? "Questa versione dell'app non può ricevere notifiche push."
         : "Il server non ha ancora attivato le notifiche per questo tipo di dispositivo.";
 
     protected override async Task OnInitializedAsync()

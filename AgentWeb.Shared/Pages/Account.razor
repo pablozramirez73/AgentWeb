@@ -90,7 +90,9 @@
                 <input class="form-control" type="password" autocomplete="new-password" @bind="newPassword" @bind:event="oninput" placeholder="Nuova password" aria-label="Nuova password" />
                 <input class="form-control" type="password" autocomplete="new-password" @bind="confirmPassword" @bind:event="oninput" placeholder="Ripeti la nuova password" aria-label="Ripeti la nuova password" />
                 <div class="form-text">Almeno 6 caratteri con maiuscola, minuscola, numero e simbolo.</div>
-                <div><button class="btn btn-primary" type="submit" disabled="@(currentPassword.Length == 0 || newPassword.Length == 0)">Cambia password</button></div>
+                <div><button class="btn btn-primary" type="submit" disabled="@(busy || currentPassword.Length == 0 || newPassword.Length == 0)">@(busy ? "Cambio in corso…" : "Cambia password")</button></div>
+                @* L'esito qui, accanto al modulo: l'avviso in cima alla pagina non si vede da quaggiù. *@
+                @if (passwordNotice is { } pn) { <div class="alert @(pn.Ok ? "alert-success" : "alert-danger") py-2 mb-0" role="status">@pn.Text</div> }
             </form>
         </div>
 
@@ -109,7 +111,8 @@
     string? loadError;
     string displayName = "";
     string currentPassword = "", newPassword = "", confirmPassword = "";
-    (bool Ok, string Text)? notice;
+    (bool Ok, string Text)? notice, passwordNotice;
+    bool busy;
 
     // L'app collega i provider dal browser: il flusso OAuth vive nei cookie del server, non nel token dell'app.
     bool InBrowser => Accounts.ServerBase.ToString() == Nav.BaseUri;
@@ -158,14 +161,16 @@
 
     async Task ChangePasswordAsync()
     {
-        if (newPassword != confirmPassword) { notice = (false, "Le due password nuove non coincidono."); return; }
+        if (newPassword != confirmPassword) { passwordNotice = (false, "Le due password nuove non coincidono."); return; }
+        busy = true; passwordNotice = null;
         try
         {
             await Accounts.ChangePasswordAsync(currentPassword, newPassword);
-            notice = (true, "Password cambiata. Le altre sessioni sono state chiuse.");
+            passwordNotice = (true, "Password cambiata. Le altre sessioni sono state chiuse.");
             currentPassword = newPassword = confirmPassword = "";
         }
-        catch (Exception ex) { notice = (false, ex.GetBaseException().Message); }
+        catch (Exception ex) { passwordNotice = (false, ex.GetBaseException().Message); }
+        finally { busy = false; }
     }
 
     static string Handle(string user) => user.Split('@')[0];
