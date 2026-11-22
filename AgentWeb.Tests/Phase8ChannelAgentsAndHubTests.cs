@@ -286,6 +286,31 @@ public sealed class TaskHandBackTests
         Assert.True(llm.Requests.Count >= 2); // l'agente è ripartito con la risposta
     }
 
+    // Un "grazie" nel thread di un task finito non lo riapre: il risultato resta, l'agente non rigira.
+    [Fact]
+    public async Task ReplyToADoneTask_KeepsItDone_AndDoesNotRerun()
+    {
+        await using var llm = await FakeLlm.StartAsync("Ecco il riassunto.");
+        using var app = new TestApp();
+        var settings = new AgentSettings { LocalAgents = [new() { Name = "Cindy", Prompt = "Ricerche.", Llm = new() { Kind = LlmKinds.OpenAI, Url = llm.Url + "/v1", ApiKey = "k", DefaultModel = "m" } }] };
+        await File.WriteAllTextAsync(Path.Combine(app.Dir, "agentsettings.json"), JsonSerializer.Serialize(settings));
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var channel = (await (await alice.PostAsJsonAsync("/api/workspace/channels", new NewChannelRequest("ricerca"))).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/agents", new { name = "Cindy" })).EnsureSuccessStatusCode();
+        var task = (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/tasks/from-text", new { text = "Riassumi le trimestrali" })).Content.ReadFromJsonAsync<TaskDto>())!;
+        async Task<TaskDto> Current() => (await alice.GetFromJsonAsync<List<TaskDto>>($"/api/workspace/channels/{channel}/tasks"))!.Single();
+        for (var i = 0; i < 100 && (await Current()).Status != WorkStatus.Done; i++) await Task.Delay(100);
+        int Calls() { lock (llm.Requests) return llm.Requests.Count; }
+        var calls = Calls();
+
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/messages", new NewMessageRequest("grazie", ParentId: task.MessageId))).EnsureSuccessStatusCode();
+        await Task.Delay(1500);
+        var t = await Current();
+        Assert.Equal((WorkStatus.Done, "Ecco il riassunto."), (t.Status, t.Result));
+        Assert.Equal(calls, Calls());
+    }
+
     // Task delegato da un agente: non c'è una persona a cui passarlo, quindi fallisce con la nota (niente "Da fare" mai in coda).
     [Fact]
     public async Task AgentHandsBack_ToARequestingAgent_FailsWithTheNote()

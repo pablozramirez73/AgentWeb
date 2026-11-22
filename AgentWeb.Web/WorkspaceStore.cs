@@ -328,14 +328,14 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         {
             // Rispondono solo gli agenti del canale; a una persona che menziona un agente assente si spiega perché tace.
             var inChannel = await ChannelAgentNamesAsync(channelId);
-            // Risposta di una persona nel thread di un task: l'agente riprende da dove era, con la risposta come contesto.
-            // shortcut: riprende a ogni risposta (anche un "grazie"); l'agente decide se c'è altro da fare.
+            // Risposta di una persona nel thread di un task che l'agente le ha passato (gli serviva una decisione): l'agente riprende
+            // da dove era, con la risposta come contesto. Un task finito o fallito non si riapre: il suo risultato resta.
             string? resumed = null;
             if (kind == AuthorKind.User && parentId is { } thread)
             {
                 await using var db = await dbf.CreateDbContextAsync();
                 if (await db.Tasks.FirstOrDefaultAsync(t => t.MessageId == thread && t.Agent != null
-                        && t.Status != WorkStatus.InProgress && t.Status != WorkStatus.Closed && t.Status != WorkStatus.Backlog) is { } task
+                        && t.Status == WorkStatus.Todo && !t.AssigneeIsAgent) is { } task
                     && inChannel.Contains(task.Agent!, StringComparer.OrdinalIgnoreCase))
                 {
                     // Condizionato allo stato letto: se il worker l'ha appena preso, non lo rimettiamo "Da fare" (girerebbe due volte).
