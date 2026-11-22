@@ -159,6 +159,29 @@ public sealed class Phase3IdempotencyTests
 
 public sealed class Phase13OpsTests
 {
+    // Un deploy ricrea il container: le chiavi di protezione devono stare sul volume, o il login di tutti decade.
+    [Fact]
+    public async Task Login_SurvivesAServerRestart()
+    {
+        var keys = Directory.CreateTempSubdirectory("agentweb-keys-").FullName;
+        var settings = new Dictionary<string, string?> { ["AgentSettings:Path"] = Path.Combine(keys, "agentsettings.json") };
+        string token, db;
+        using (var first = new TestApp(settings, sharedDatabase: null))
+        {
+            await first.CreateUserAsync("alice@test.it");
+            token = (await first.LoginTokensAsync("alice@test.it")).AccessToken;
+            db = first.Database;
+            using var probe = first.Bearer(token);
+            Assert.Equal(HttpStatusCode.OK, (await probe.GetAsync("/api/workspace/channels")).StatusCode);
+            Assert.NotEmpty(Directory.GetFiles(Path.Combine(keys, "dataprotection-keys"), "*.xml"));
+
+            using var second = new TestApp(settings, sharedDatabase: db); // stesso DB e stessa cartella: il "server riavviato"
+            using var again = second.Bearer(token);
+            Assert.Equal(HttpStatusCode.OK, (await again.GetAsync("/api/workspace/channels")).StatusCode);
+        }
+        Directory.Delete(keys, recursive: true);
+    }
+
     [Fact]
     public async Task OpenApi_IsDeterministic_AndNotPublic()
     {

@@ -6,6 +6,7 @@ using AgentWeb.Web;
 using AgentWeb.Web.Components;
 using AgentWeb.Web.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
@@ -50,6 +51,12 @@ builder.Services.AddSingleton<IFormFactor, FormFactor>();
 builder.Services.AddDbContextFactory<AppDb>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("Manca ConnectionStrings:Default (Postgres).")));
 builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDb>>().CreateDbContext());
+// Chiavi di cookie, token dell'app e antiforgery: accanto ad agentsettings.json (volume persistente), altrimenti
+// nel container restano in memoria e ogni riavvio o deploy disconnette tutti.
+// shortcut: cartella locale, una sola replica; con più repliche servono chiavi condivise (PersistKeysToDbContext).
+builder.Services.AddDataProtection().SetApplicationName("AgentWeb").PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(
+    Path.GetDirectoryName(Path.GetFullPath(builder.Configuration["AgentSettings:Path"] ?? Path.Combine(builder.Environment.ContentRootPath, "agentsettings.json")))!,
+    "dataprotection-keys")));
 builder.Services.AddIdentityApiEndpoints<AppUser>()
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<AppDb>();
