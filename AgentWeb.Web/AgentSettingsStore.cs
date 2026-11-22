@@ -58,12 +58,19 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
     public Task<string> TestA2AAsync(A2AAgentConfig agent, CancellationToken ct = default) => AgentConnections.TestA2AAsync(agent, ct);
 
     public async Task<string> TestLlmAsync(LlmProviderConfig provider, CancellationToken ct = default) => provider.Kind != LlmKinds.Daemon
-        ? await LlmClients.TestAsync(provider, ct)
+        ? await Explained(() => LlmClients.TestAsync(provider, ct), provider, ct)
         : await daemons.OffersAsync(provider.Url.Trim(), provider.DefaultModel)
             ? $"Il daemon di {provider.Url.Trim()} è collegato e offre «{provider.DefaultModel}»."
             : throw new InvalidOperationException($"Nessun daemon di {provider.Url.Trim()} collegato con il runtime «{provider.DefaultModel}».");
 
     // Per un daemon i "modelli" sono i runtime che i suoi computer collegati offrono.
     public Task<List<string>> ListModelsAsync(LlmProviderConfig provider, CancellationToken ct = default) =>
-        provider.Kind == LlmKinds.Daemon ? daemons.RuntimesAsync(provider.Url.Trim()) : LlmClients.ListModelsAsync(provider, ct);
+        provider.Kind == LlmKinds.Daemon ? daemons.RuntimesAsync(provider.Url.Trim()) : Explained(() => LlmClients.ListModelsAsync(provider, ct), provider, ct);
+
+    static async Task<T> Explained<T>(Func<Task<T>> call, LlmProviderConfig provider, CancellationToken ct)
+    {
+        try { return await call(); }
+        catch (Exception e) when (!ct.IsCancellationRequested && e is HttpRequestException or TaskCanceledException or TimeoutException)
+        { throw LlmClients.Explain(e, provider); }
+    }
 }

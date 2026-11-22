@@ -19,6 +19,30 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
 {
     // Timeout lungo: un modello locale caricato a freddo può metterci minuti.
     static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
+    // ...ma la connessione no: un host irraggiungibile risponde (o non risponde) in pochi secondi, non deve sembrare un modello che carica.
+    static readonly SocketsHttpHandler Net = new() { ConnectTimeout = TimeSpan.FromSeconds(8), PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
+
+    // Errori di rete in parole utili: il server gira sul VPS, quindi "localhost" e la rete di casa non sono il computer di chi configura.
+    public static Exception Explain(Exception e, LlmProviderConfig p)
+    {
+        if (!Uri.TryCreate(p.Url.Trim(), UriKind.Absolute, out var uri)) return new InvalidOperationException($"URL non valido: «{p.Url}».");
+        var local = uri.IsLoopback || uri.Host is "0.0.0.0" or "host.docker.internal";
+        var onYourComputer = "Per usare Ollama sul tuo computer scegli il tipo «Computer di un utente (agentweb daemon)» e lì avvia " +
+            "`agentweb daemon --runtime ollama=\"ollama run <modello>\"`: il daemon si collega lui al server, nessuna porta da aprire.";
+        var socket = (e as HttpRequestException)?.InnerException as System.Net.Sockets.SocketException;
+        return socket?.SocketErrorCode switch
+        {
+            System.Net.Sockets.SocketError.ConnectionRefused when local => new InvalidOperationException(
+                $"Connessione rifiutata: «{uri.Host}» qui è il server di AgentWeb, non il tuo computer. {onYourComputer}"),
+            System.Net.Sockets.SocketError.ConnectionRefused => new InvalidOperationException(
+                $"{uri.Host}:{uri.Port} rifiuta la connessione: lì Ollama non è in ascolto su quella porta (su quel computer serve OLLAMA_HOST=0.0.0.0)."),
+            System.Net.Sockets.SocketError.HostNotFound or System.Net.Sockets.SocketError.NoData => new InvalidOperationException(
+                $"Il nome «{uri.Host}» non esiste per il server: usa un indirizzo raggiungibile da internet."),
+            _ when e is TaskCanceledException or TimeoutException || e.InnerException is TimeoutException => new InvalidOperationException(
+                $"{uri.Host}:{uri.Port} non risponde dal server: non è raggiungibile da internet (rete di casa, firewall, o Ollama solo su 127.0.0.1). {onYourComputer}"),
+            _ => e,
+        };
+    }
     readonly ConcurrentDictionary<string, IChatClient> cache = new();
     readonly ConcurrentDictionary<string, SemaphoreSlim> perServer = new();
     readonly int maxPerServer = Math.Max(1, config.GetValue("Agents:MaxParallelPerLlm", Environment.ProcessorCount));
@@ -42,7 +66,7 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
     {
         var url = p.Url.Trim().TrimEnd('/');
         var key = string.IsNullOrWhiteSpace(p.ApiKey) ? null : p.ApiKey.Trim();
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        using var http = new HttpClient(Net, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(30) };
         HttpRequestMessage req;
         if (LlmKinds.IsOllama(p.Kind)) req = new(HttpMethod.Get, url + "/api/tags");
         else if (p.Kind == LlmKinds.OpenAI) req = new(HttpMethod.Get, url + "/models");
@@ -82,7 +106,7 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
         switch (p.Kind)
         {
             case LlmKinds.OllamaLocal or LlmKinds.OllamaRemote or LlmKinds.OllamaCloud:
-                var http = new HttpClient { BaseAddress = new Uri(url + "/"), Timeout = Timeout };
+                var http = new HttpClient(Net, disposeHandler: false) { BaseAddress = new Uri(url + "/"), Timeout = Timeout };
                 // Ollama Cloud (https://ollama.com) e i server remoti protetti vogliono la chiave come Bearer.
                 if (key is not null) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
                 return new OllamaApiClient(http, model);

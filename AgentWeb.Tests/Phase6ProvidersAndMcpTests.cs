@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
@@ -403,5 +405,32 @@ public sealed class Phase6RealOllamaCollaborationTests
         Assert.True(done?.Status == WorkStatus.Done, log);
         Assert.Contains(messages, m => m.Author == "Capo" && m.Text.StartsWith("→ chiedo a Esperto"));
         Assert.Contains(messages, m => m.Author == "Esperto");
+    }
+}
+
+// Ollama irraggiungibile dal server: errore in pochi secondi, con la spiegazione (localhost è il server, non il computer di chi configura).
+public sealed class LlmConnectionErrorTests
+{
+    [Fact]
+    public async Task LocalhostRefused_ExplainsItIsTheServer_AndPointsToTheDaemon()
+    {
+        using var app = new TestApp();
+        var store = app.Services.GetRequiredService<AgentSettingsStore>();
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.ListModelsAsync(new() { Kind = LlmKinds.OllamaLocal, Url = "http://localhost:1" }));
+        Assert.Contains("non il tuo computer", e.Message);
+        Assert.Contains("agentweb daemon", e.Message);
+    }
+
+    [Fact]
+    public async Task UnreachableHost_FailsFast_InsteadOfLookingLikeItIsLoading()
+    {
+        using var app = new TestApp();
+        var store = app.Services.GetRequiredService<AgentSettingsStore>();
+        var clock = Stopwatch.StartNew();
+        var e = await Assert.ThrowsAnyAsync<Exception>(() =>
+            store.ListModelsAsync(new() { Kind = LlmKinds.OllamaRemote, Url = "http://10.255.255.1:11434" })); // nessuno risponde
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(15), $"{clock.Elapsed.TotalSeconds:F0} s");
+        Assert.Contains("10.255.255.1", e.Message);
     }
 }
