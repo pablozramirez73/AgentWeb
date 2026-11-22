@@ -1,0 +1,14 @@
+{
+  "name": "AgentWeb",
+  "short_name": "AgentWeb",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3efff",
+  "theme_color": "#6d3df5",
+  "icons": [
+    { "src": "/_content/AgentWeb.Shared/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/_content/AgentWeb.Shared/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
