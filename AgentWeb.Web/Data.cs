@@ -199,6 +199,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         b.Entity<DaemonMachineEntity>().HasKey(m => m.Sid);
         b.Entity<DaemonMachineEntity>().HasIndex(m => m.Owner);
         b.Entity<TaskEntity>().HasIndex(t => t.ChannelId);
+        b.Entity<TaskEntity>().HasIndex(t => t.MessageId).IsUnique().HasFilter("\"MessageId\" IS NOT NULL"); // un messaggio, al massimo un task
         b.Entity<ChannelMemberEntity>().HasKey(m => new { m.ChannelId, m.UserName });
         b.Entity<ChannelAgentEntity>().HasKey(a => new { a.ChannelId, a.AgentName });
         b.Entity<ChannelMemberEntity>().HasIndex(m => m.UserName);

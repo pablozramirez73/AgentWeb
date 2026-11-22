@@ -286,6 +286,28 @@ public sealed class TaskHandBackTests
         Assert.True(llm.Requests.Count >= 2); // l'agente è ripartito con la risposta
     }
 
+    // Doppio clic (o clic e agente insieme) su "Crea task dal messaggio": un solo task, e tutti ricevono quello.
+    [Fact]
+    public async Task ConcurrentTaskFromMessage_CreatesOneTask()
+    {
+        using var app = new TestApp();
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var channel = (await (await alice.PostAsJsonAsync("/api/workspace/channels", new NewChannelRequest("gara"))).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/messages", new NewMessageRequest("prepara il report"))).EnsureSuccessStatusCode();
+        var msg = (await alice.GetFromJsonAsync<List<MessageDto>>($"/api/workspace/channels/{channel}/messages"))!.Single(m => m.Kind == AuthorKind.User);
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 10).Select(async _ =>
+        {
+            var r = await alice.PostAsync($"/api/workspace/channels/{channel}/messages/{msg.Id}/task", null);
+            var body = await r.Content.ReadAsStringAsync();
+            Assert.True(r.IsSuccessStatusCode && body.Length > 0, $"{(int)r.StatusCode}: {body}");
+            return System.Text.Json.JsonSerializer.Deserialize<TaskDto>(body, System.Text.Json.JsonSerializerOptions.Web)!.Id;
+        }));
+        var t = Assert.Single((await alice.GetFromJsonAsync<List<TaskDto>>($"/api/workspace/channels/{channel}/tasks"))!);
+        Assert.All(results, id => Assert.Equal(t.Id, id));
+    }
+
     // Un "grazie" nel thread di un task finito non lo riapre: il risultato resta, l'agente non rigira.
     [Fact]
     public async Task ReplyToADoneTask_KeepsItDone_AndDoesNotRerun()

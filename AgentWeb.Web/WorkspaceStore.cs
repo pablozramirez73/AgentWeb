@@ -531,7 +531,9 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         if (await db.Tasks.FirstOrDefaultAsync(t => t.MessageId == m.Id) is { } existing) return ToDto(existing);
         var inChannel = await ChannelAgentNamesAsync(channelId);
         var agent = Mentions(m.Text).FirstOrDefault(a => inChannel.Contains(a, StringComparer.OrdinalIgnoreCase)) ?? (inChannel.Count == 1 ? inChannel[0] : null);
-        return await AddMessageTaskAsync(db, m, m.Author, agent, null);
+        if (await AddMessageTaskAsync(db, m, m.Author, agent, null) is { } created) return created;
+        await using var again = await dbf.CreateDbContextAsync(); // l'ha creato qualcun altro nello stesso istante
+        return ToDto(await again.Tasks.SingleAsync(t => t.MessageId == m.Id));
     }
 
     // "Come task": il messaggio non attiva le @menzioni (risponderebbe due volte), il task lo fa partire.
@@ -553,7 +555,8 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         return await AddMessageTaskAsync(db, m, m.Author, agent, plan);
     }
 
-    async Task<TaskDto> AddMessageTaskAsync(AppDb db, MessageEntity m, string createdBy, string? agent, string? plan)
+    // null = un'altra richiesta ha creato il task di questo messaggio nello stesso istante (indice unico su MessageId).
+    async Task<TaskDto?> AddMessageTaskAsync(AppDb db, MessageEntity m, string createdBy, string? agent, string? plan)
     {
         var firstLine = m.Text.ReplaceLineEndings("\n").Split('\n')[0].Trim();
         var t = new TaskEntity
@@ -563,7 +566,8 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             Status = WorkStatus.Todo, CreatedBy = createdBy, UpdatedAt = DateTimeOffset.UtcNow,
         };
         db.Tasks.Add(t);
-        await db.SaveChangesAsync();
+        try { await db.SaveChangesAsync(); }
+        catch (DbUpdateException e) when (e.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation }) { return null; }
         var dto = ToDto(t);
         bus.Publish(new("task", m.ChannelId, Task: dto));
         if (agent is not null)

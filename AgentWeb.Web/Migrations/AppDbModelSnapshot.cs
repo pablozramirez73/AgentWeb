@@ -17,7 +17,7 @@ partial class AppDbModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261122211408_DaemonWaiterHeartbeat";
+    public override string LastMigrationId => "20261122213501_UniqueTaskPerMessage";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -473,6 +473,10 @@ partial class AppDbModelSnapshot : ModelSnapshot
                 b.HasKey("Id");
 
                 b.HasIndex("ChannelId");
+
+                b.HasIndex("MessageId")
+                    .IsUnique()
+                    .HasFilter("\"MessageId\" IS NOT NULL");
 
                 b.ToTable("Tasks");
             });
