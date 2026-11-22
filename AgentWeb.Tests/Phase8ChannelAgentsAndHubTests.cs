@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentWeb.Tests;
 
@@ -283,6 +284,30 @@ public sealed class TaskHandBackTests
         (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/messages", new NewMessageRequest("Markdown", ParentId: task.MessageId))).EnsureSuccessStatusCode();
         for (var i = 0; i < 100 && llm.Requests.Count < 2; i++) await Task.Delay(100);
         Assert.True(llm.Requests.Count >= 2); // l'agente è ripartito con la risposta
+    }
+
+    // Task delegato da un agente: non c'è una persona a cui passarlo, quindi fallisce con la nota (niente "Da fare" mai in coda).
+    [Fact]
+    public async Task AgentHandsBack_ToARequestingAgent_FailsWithTheNote()
+    {
+        await using var llm = await FakeLlm.StartAsync("PER TE: preferisci PDF o Markdown?");
+        using var app = new TestApp();
+        LocalAgentConfig Agent(string name) => new() { Name = name, Prompt = "Ricerche.", Llm = new() { Kind = LlmKinds.OpenAI, Url = llm.Url + "/v1", ApiKey = "k", DefaultModel = "m" } };
+        await File.WriteAllTextAsync(Path.Combine(app.Dir, "agentsettings.json"), JsonSerializer.Serialize(new AgentSettings { LocalAgents = [Agent("Bob"), Agent("Cindy")] }));
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var channel = (await (await alice.PostAsJsonAsync("/api/workspace/channels", new NewChannelRequest("ricerca"))).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        foreach (var a in new[] { "Bob", "Cindy" }) (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/agents", new { name = a })).EnsureSuccessStatusCode();
+
+        var store = app.Services.GetRequiredService<WorkspaceStore>();
+        var task = (await store.CreateTaskByAgentAsync(channel, "Bob", "Riassumi le trimestrali", "", "Cindy", 5))!;
+        async Task<TaskDto> Current() => (await alice.GetFromJsonAsync<List<TaskDto>>($"/api/workspace/channels/{channel}/tasks"))!.Single(t => t.Id == task.Id);
+        for (var i = 0; i < 100 && (await Current()).Status != WorkStatus.Failed; i++) await Task.Delay(100);
+        var t = await Current();
+        Assert.Equal((WorkStatus.Failed, "Cindy"), (t.Status, t.Assignee));
+        var messages = (await alice.GetFromJsonAsync<List<MessageDto>>($"/api/workspace/channels/{channel}/messages"))!;
+        Assert.DoesNotContain(messages, m => m.Text.Contains("passa a te"));
+        Assert.Contains(messages, m => m.Author == "Cindy" && m.Text.Contains("PDF o Markdown"));
     }
 
     [Fact]

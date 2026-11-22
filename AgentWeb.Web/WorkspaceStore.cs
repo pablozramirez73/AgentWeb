@@ -576,13 +576,20 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     }
 
     // L'agente ha bisogno di una decisione (o gli è stato chiesto di far controllare il lavoro): il task passa a chi l'ha chiesto.
-    public async Task HandToRequesterAsync(int taskId, string note)
+    // Se l'ha chiesto un agente non c'è nessuno a cui passarlo (e un "Da fare" di un agente nessuno lo rimette in coda):
+    // il task fallisce con la nota. Restituisce true se è passato a una persona.
+    public async Task<bool> HandToRequesterAsync(int taskId, string note)
     {
         await using var db = await dbf.CreateDbContextAsync();
-        if (await db.Tasks.FindAsync(taskId) is not { } t) return;
-        var requesterIsPerson = !settings.Get().EnabledAgentNames().Contains(t.CreatedBy, StringComparer.OrdinalIgnoreCase);
-        if (requesterIsPerson) { t.Assignee = t.CreatedBy; t.AssigneeIsAgent = false; }
+        if (await db.Tasks.FindAsync(taskId) is not { } t) return false;
+        if (settings.Get().EnabledAgentNames().Contains(t.CreatedBy, StringComparer.OrdinalIgnoreCase))
+        {
+            await SaveStatusAsync(db, t, WorkStatus.Failed, note);
+            return false;
+        }
+        t.Assignee = t.CreatedBy; t.AssigneeIsAgent = false;
         await SaveStatusAsync(db, t, WorkStatus.Todo, note);
+        return true;
     }
 
     // Conversazione del task (thread della richiesta), per il prompt dell'agente.

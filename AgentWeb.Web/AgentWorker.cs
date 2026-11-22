@@ -249,8 +249,10 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
             if (result.StartsWith(HandMarker, StringComparison.OrdinalIgnoreCase))
             {
                 var note = result[HandMarker.Length..].Trim();
-                await ws.HandToRequesterAsync(taskId, note);
-                await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, $"@{task.CreatedBy.Split('@')[0]} il task #{task.Id} passa a te:\n{note}", WorkspaceStore.NoMentions, parentId: task.MessageId);
+                var text = await ws.HandToRequesterAsync(taskId, note)
+                    ? $"@{task.CreatedBy.Split('@')[0]} il task #{task.Id} passa a te:\n{note}"
+                    : $"Task #{task.Id} «{task.Title}» fermo: mi serve una decisione che un agente non può prendere.\n{note}";
+                await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, text, WorkspaceStore.NoMentions, parentId: task.MessageId);
                 return;
             }
             await ws.FinishTaskAsync(taskId, WorkStatus.Done, result);
