@@ -80,6 +80,8 @@ public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus,
     public async Task<List<string>> GetPeopleAsync() => await store.GetPeopleAsync(await UserAsync());
     public async Task<List<TaskDto>> GetAllTasksAsync() => await store.GetAllTasksAsync(await UserAsync());
     public async Task<List<TaskDto>> GetTasksAsync(int channelId) => await store.GetTasksAsync(channelId, await UserAsync());
+    public async Task<TaskDto> CreateTaskFromMessageAsync(int channelId, long messageId) => await store.CreateTaskFromMessageAsync(channelId, messageId, await UserAsync());
+    public async Task<TaskDto> SendAsTaskAsync(int channelId, string text) => await store.SendAsTaskAsync(channelId, await UserAsync(), text);
     public async Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task) => await store.CreateTaskAsync(channelId, task, await UserAsync());
     public async Task SetTaskStatusAsync(int taskId, WorkStatus status) => await store.SetStatusByUserAsync(taskId, status, await UserAsync());
     public Task<List<string>> GetAgentsAsync() => store.GetAgentsAsync();

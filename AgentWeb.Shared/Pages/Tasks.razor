@@ -334,7 +334,7 @@
         {
             @if (agent && agentIcons.TryGetValue(user, out var src)) { <span class="avatar avatar-agent avatar-icon" style="--size: 1.4rem"><img src="@src" alt="" /></span> }
             else if (agent) { <span class="avatar avatar-agent" style="--size: 1.4rem">✦</span> }
-            else { <span class="avatar" style="--size: 1.4rem">@Initials(user)</span> }
+            else { <span class="avatar" style="@AvatarColor.Style(user, "1.4rem")">@Initials(user)</span> }
             <span>@Name(user)</span>
         }</span>;
 

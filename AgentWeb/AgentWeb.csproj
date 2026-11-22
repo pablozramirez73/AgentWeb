@@ -1,6 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
+    <MauiVersion>11.0.10</MauiVersion>
+    <!-- shortcut: CoreCLR al posto di Mono solo con -p:CoreClr=true, finché non è misurato sul dispositivo -->
+    <UseMonoRuntime Condition="'$(CoreClr)' == 'true'">false</UseMonoRuntime>
     <TargetFrameworks>net11.0-android</TargetFrameworks>
     <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net11.0-ios</TargetFrameworks>
 

@@ -66,7 +66,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     {
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
+        await db.Database.ExecuteSqlAsync($"""
             INSERT INTO "ReadCursors" ("UserName", "ChannelId", "LastReadId") VALUES ({user}, {channelId}, {lastId})
             ON CONFLICT ("UserName", "ChannelId") DO UPDATE SET "LastReadId" = GREATEST("ReadCursors"."LastReadId", EXCLUDED."LastReadId")
             """);
@@ -77,7 +77,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         if (!await db.Messages.AnyAsync(m => m.Id == rootId && m.ChannelId == channelId && m.ParentId == null)) throw new KeyNotFoundException($"Thread {rootId} inesistente.");
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
+        await db.Database.ExecuteSqlAsync($"""
             INSERT INTO "ThreadReadCursors" ("UserName", "RootId", "LastReadId") VALUES ({user}, {rootId}, {lastId})
             ON CONFLICT ("UserName", "RootId") DO UPDATE SET "LastReadId" = GREATEST("ThreadReadCursors"."LastReadId", EXCLUDED."LastReadId")
             """);
@@ -327,10 +327,34 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         {
             // Rispondono solo gli agenti del canale; a una persona che menziona un agente assente si spiega perché tace.
             var inChannel = await ChannelAgentNamesAsync(channelId);
+            // Risposta di una persona nel thread di un task: l'agente riprende da dove era, con la risposta come contesto.
+            // shortcut: riprende a ogni risposta (anche un "grazie"); l'agente decide se c'è altro da fare.
+            string? resumed = null;
+            if (kind == AuthorKind.User && parentId is { } thread)
+            {
+                await using var db = await dbf.CreateDbContextAsync();
+                if (await db.Tasks.FirstOrDefaultAsync(t => t.MessageId == thread && t.Agent != null
+                        && t.Status != WorkStatus.InProgress && t.Status != WorkStatus.Closed && t.Status != WorkStatus.Backlog) is { } task
+                    && inChannel.Contains(task.Agent!, StringComparer.OrdinalIgnoreCase))
+                {
+                    // Condizionato allo stato letto: se il worker l'ha appena preso, non lo rimettiamo "Da fare" (girerebbe due volte).
+                    var observed = task.Status;
+                    var now = DateTimeOffset.UtcNow;
+                    if (await db.Tasks.Where(x => x.Id == task.Id && x.Status == observed).ExecuteUpdateAsync(u => u
+                            .SetProperty(x => x.Assignee, task.Agent).SetProperty(x => x.AssigneeIsAgent, true)
+                            .SetProperty(x => x.Status, WorkStatus.Todo).SetProperty(x => x.UpdatedAt, now)) > 0)
+                    {
+                        task.Assignee = task.Agent; task.AssigneeIsAgent = true; task.Status = WorkStatus.Todo; task.UpdatedAt = now;
+                        bus.Publish(new("task", channelId, Task: ToDto(task)));
+                        queue.Enqueue(new(channelId, task.Agent!, task.Id, 0, thread));
+                    }
+                    resumed = task.Agent;
+                }
+            }
             if (kind == AuthorKind.User && await DirectAgentAsync(channelId) is { } direct && inChannel.Contains(direct, StringComparer.OrdinalIgnoreCase)
                 && !Mentions(text).Contains(direct, StringComparer.OrdinalIgnoreCase))
                 queue.Enqueue(new(channelId, direct, null, depth + 1, parentId)); // in un messaggio diretto con un agente non serve la @menzione
-            foreach (var agent in Mentions(text).Where(a => !a.Equals(author, StringComparison.OrdinalIgnoreCase)))
+            foreach (var agent in Mentions(text).Where(a => !a.Equals(author, StringComparison.OrdinalIgnoreCase) && !a.Equals(resumed, StringComparison.OrdinalIgnoreCase)))
             {
                 if (inChannel.Contains(agent, StringComparer.OrdinalIgnoreCase)) queue.Enqueue(new(channelId, agent, null, depth + 1, parentId));
                 else if (kind == AuthorKind.User)
@@ -475,7 +499,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         if (openByAgents >= maxOpen) return null;
         var t = new TaskEntity
         {
-            ChannelId = channelId, Title = title, Description = description, Assignee = assignee, AssigneeIsAgent = true,
+            ChannelId = channelId, Title = title, Description = description, Assignee = assignee, AssigneeIsAgent = true, Agent = assignee,
             Status = WorkStatus.Todo, CreatedBy = agent, UpdatedAt = DateTimeOffset.UtcNow,
         };
         db.Tasks.Add(t);
@@ -485,6 +509,82 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await PostAsync(channelId, "Sistema", AuthorKind.System, $"{agent} ha creato il task #{t.Id} «{title}» per {assignee}.");
         queue.Enqueue(new(channelId, assignee, t.Id, 0));
         return dto;
+    }
+
+    // "Crea task dal messaggio": il task punta al messaggio (radice del thread) e lo prende l'agente menzionato,
+    // o l'unico agente del canale; senza agenti resta da assegnare. Un messaggio ha al massimo un task.
+    public async Task<TaskDto> CreateTaskFromMessageAsync(int channelId, long messageId, string user)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
+        var m = await db.Messages.FirstOrDefaultAsync(x => x.Id == messageId && x.ChannelId == channelId && x.Kind != AuthorKind.System)
+            ?? throw new KeyNotFoundException($"Messaggio {messageId} inesistente.");
+        if (m.ParentId is { } root) m = await db.Messages.SingleAsync(x => x.Id == root); // il task è della richiesta, non di una risposta
+        if (await db.Tasks.FirstOrDefaultAsync(t => t.MessageId == m.Id) is { } existing) return ToDto(existing);
+        var inChannel = await ChannelAgentNamesAsync(channelId);
+        var agent = Mentions(m.Text).FirstOrDefault(a => inChannel.Contains(a, StringComparer.OrdinalIgnoreCase)) ?? (inChannel.Count == 1 ? inChannel[0] : null);
+        return await AddMessageTaskAsync(db, m, m.Author, agent, null);
+    }
+
+    // "Come task": il messaggio non attiva le @menzioni (risponderebbe due volte), il task lo fa partire.
+    public async Task<TaskDto> SendAsTaskAsync(int channelId, string user, string text)
+    {
+        text = Required(text, 4000, "Messaggio");
+        await using (var check = await dbf.CreateDbContextAsync()) await ChannelVisibility.EnsureAccessAsync(check, channelId, user);
+        var posted = await PostAsync(channelId, user, AuthorKind.User, text, NoMentions);
+        return await CreateTaskFromMessageAsync(channelId, posted.Id, user);
+    }
+
+    // L'agente ha deciso che la richiesta è un lavoro vero: lo prende come task (chi ha chiesto ne resta l'autore).
+    public async Task<TaskDto?> TakeAsTaskAsync(int channelId, string agent, long messageId, string plan)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        if (await db.Messages.FirstOrDefaultAsync(x => x.Id == messageId && x.ChannelId == channelId) is not { } m) return null;
+        if (m.ParentId is { } root) m = await db.Messages.SingleAsync(x => x.Id == root);
+        if (await db.Tasks.AnyAsync(t => t.MessageId == m.Id)) return null;
+        return await AddMessageTaskAsync(db, m, m.Author, agent, plan);
+    }
+
+    async Task<TaskDto> AddMessageTaskAsync(AppDb db, MessageEntity m, string createdBy, string? agent, string? plan)
+    {
+        var firstLine = m.Text.ReplaceLineEndings("\n").Split('\n')[0].Trim();
+        var t = new TaskEntity
+        {
+            ChannelId = m.ChannelId, Title = firstLine.Length > 120 ? firstLine[..120] + "…" : firstLine, Description = m.Text,
+            Assignee = agent, AssigneeIsAgent = agent is not null, Agent = agent, MessageId = m.Id,
+            Status = WorkStatus.Todo, CreatedBy = createdBy, UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        db.Tasks.Add(t);
+        await db.SaveChangesAsync();
+        var dto = ToDto(t);
+        bus.Publish(new("task", m.ChannelId, Task: dto));
+        if (agent is not null)
+        {
+            // Conferma nel thread della richiesta: lì l'agente lavora e consegna.
+            await PostAsync(m.ChannelId, agent, AuthorKind.Agent, $"Lo prendo io come task #{t.Id}." + (string.IsNullOrWhiteSpace(plan) ? "" : $"\n{plan.Trim()}"), NoMentions, parentId: m.Id);
+            queue.Enqueue(new(m.ChannelId, agent, t.Id, 0, m.Id));
+        }
+        return dto;
+    }
+
+    // L'agente ha bisogno di una decisione (o gli è stato chiesto di far controllare il lavoro): il task passa a chi l'ha chiesto.
+    public async Task HandToRequesterAsync(int taskId, string note)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        if (await db.Tasks.FindAsync(taskId) is not { } t) return;
+        var requesterIsPerson = !settings.Get().EnabledAgentNames().Contains(t.CreatedBy, StringComparer.OrdinalIgnoreCase);
+        if (requesterIsPerson) { t.Assignee = t.CreatedBy; t.AssigneeIsAgent = false; }
+        await SaveStatusAsync(db, t, WorkStatus.Todo, note);
+    }
+
+    // Conversazione del task (thread della richiesta), per il prompt dell'agente.
+    public async Task<string> ThreadTranscriptAsync(long rootId)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        var sb = new StringBuilder();
+        foreach (var m in await db.Messages.Where(m => m.Id == rootId || m.ParentId == rootId).OrderBy(m => m.Id).Take(100).ToListAsync())
+            sb.AppendLine($"[{m.Author}]: {m.Text}");
+        return sb.ToString();
     }
 
     public async Task<List<TaskDto>> GetTasksAsync(int channelId, string user)
@@ -513,7 +613,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var t = new TaskEntity
         {
-            ChannelId = channelId, Title = title, Description = description, Assignee = assignee, AssigneeIsAgent = isAgent,
+            ChannelId = channelId, Title = title, Description = description, Assignee = assignee, AssigneeIsAgent = isAgent, Agent = isAgent ? assignee : null,
             Status = WorkStatus.Todo, CreatedBy = user, UpdatedAt = DateTimeOffset.UtcNow,
         };
         db.Tasks.Add(t);
@@ -545,7 +645,16 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         // Gli agenti gestiscono da soli "In corso" e "Fatto"; mentre ci lavorano il task non si sposta.
         if (t.AssigneeIsAgent && status is WorkStatus.InProgress or WorkStatus.Done) throw new ArgumentException("I task degli agenti si chiudono da soli.");
         if (t.AssigneeIsAgent && t.Status == WorkStatus.InProgress) throw new ArgumentException($"{t.Assignee} ci sta lavorando: aspetta che finisca.");
-        await SaveStatusAsync(db, t, status, status == WorkStatus.Todo ? null : t.Result);
+        // Scrittura condizionata allo stato letto: se nel frattempo il worker l'ha preso (StartTaskAsync), non lo sovrascriviamo.
+        var observed = t.Status;
+        var result = status == WorkStatus.Todo ? null : t.Result;
+        var now = DateTimeOffset.UtcNow;
+        var changed = await db.Tasks.Where(x => x.Id == taskId && x.Status == observed)
+            .ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, status).SetProperty(x => x.Result, result).SetProperty(x => x.UpdatedAt, now));
+        if (changed == 0)
+            throw new ArgumentException(t.AssigneeIsAgent ? $"{t.Assignee} ci sta lavorando: aspetta che finisca." : "Il task è cambiato nel frattempo: ricarica.");
+        t.Status = status; t.Result = result; t.UpdatedAt = now;
+        bus.Publish(new("task", t.ChannelId, Task: ToDto(t)));
         var verb = status switch
         {
             WorkStatus.Done => "completato", WorkStatus.Todo => "riaperto", WorkStatus.InProgress => "iniziato",
@@ -624,7 +733,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     }
 
     static MessageDto ToDto(MessageEntity m) => new(m.Id, m.ChannelId, m.Author, m.Kind, m.Text, m.At, m.ParentId);
-    static TaskDto ToDto(TaskEntity t) => new(t.Id, t.ChannelId, t.Title, t.Description, t.Assignee, t.AssigneeIsAgent, t.Status, t.Result, t.CreatedBy, t.UpdatedAt);
+    static TaskDto ToDto(TaskEntity t) => new(t.Id, t.ChannelId, t.Title, t.Description, t.Assignee, t.AssigneeIsAgent, t.Status, t.Result, t.CreatedBy, t.UpdatedAt, t.MessageId, t.Agent);
 
     [GeneratedRegex(@"@([\p{L}\p{N}_-]+)")]
     private static partial Regex MentionRegex();

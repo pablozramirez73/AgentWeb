@@ -17,7 +17,7 @@
     <PackageReference Include="A2A.AspNetCore" Version="1.0.0-preview4" />
     <PackageReference Include="AGUI.Formatting" Version="1.0.1" />
     <PackageReference Include="AGUI.Server" Version="1.0.1" />
-    <PackageReference Include="Anthropic" Version="13.10.0" />
+    <PackageReference Include="Anthropic" Version="13.12.0" />
     <PackageReference Include="dotAPNS" Version="4.6.0" />
     <PackageReference Include="Lib.Net.Http.WebPush" Version="3.3.1" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Server.AutoPause" Version="11.0.0" />
@@ -33,7 +33,7 @@
     </PackageReference>
     <PackageReference Include="A2A" Version="1.0.0-preview4" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="11.0.0" />
-    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="11.0.1" />
     <PackageReference Include="ModelContextProtocol" Version="2.4.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.4.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="11.0.0-rc.3" />

@@ -202,33 +202,56 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
             Conversazione recente:
             {await ws.TranscriptAsync(job.ChannelId)}
             Ti hanno menzionato: scrivi solo il tuo nuovo messaggio, senza ripetere la conversazione né il tuo nome.
+            Se ti chiedono un lavoro vero (una ricerca, un documento, un'analisi, una modifica) e non una risposta veloce,
+            non farlo adesso: rispondi solo con una riga che inizia con "{TakeMarker}" seguita da cosa farai, in una frase.
+            Se manca qualcosa per capire la richiesta, chiedilo invece di prenderla.
             {await TeamAsync(job.Agent, job.ChannelId)}
             """;
-        var focus = (await ws.LatestMessagesAsync(job.ChannelId, 5)).LastOrDefault(m => m.Text.Contains('@' + job.Agent, StringComparison.OrdinalIgnoreCase))?.Text;
+        var request = (await ws.LatestMessagesAsync(job.ChannelId, 5)).LastOrDefault(m => m.Text.Contains('@' + job.Agent, StringComparison.OrdinalIgnoreCase));
+        var focus = request?.Text;
         var reply = await runtime.AskAsync(job.Agent, prompt, ct, new AgentCall(job.ChannelId, 0, focus));
+        // Lavoro vero: diventa un task della richiesta (conferma nel suo thread, poi il lavoro parte dalla coda).
+        if (reply.TrimStart().StartsWith(TakeMarker, StringComparison.OrdinalIgnoreCase) && request is not null
+            && await ws.TakeAsTaskAsync(job.ChannelId, job.Agent, request.Id, reply.TrimStart()[TakeMarker.Length..]) is not null)
+            return;
         await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, reply.Length > 0 ? reply : "(nessuna risposta)", job.Depth, parentId: job.ParentId);
     }
 
     // Il task è del suo assegnatario, che lo coordina: può dividerlo tra gli altri agenti (ask_agent) e poi compone il risultato.
+    const string TakeMarker = "TASK:", HandMarker = "PER TE:";
+
     async Task RunTaskAsync(AgentJob job, int taskId, CancellationToken ct)
     {
         if (await ws.StartTaskAsync(taskId) is not { } task) return; // già preso o chiuso
         try
         {
+            // Task nato da un messaggio: il thread della richiesta è la sua conversazione (risultato, domande, correzioni).
+            var thread = task.MessageId is { } root ? await ws.ThreadTranscriptAsync(root) : null;
             var prompt = $"""
                 Sei {job.Agent} e coordini il task #{task.Id}: {task.Title}
                 {task.Description}
 
+                {(thread is null ? "" : $"Conversazione del task (richiesta e risposte, le ultime sono le più recenti):\n{thread}\n")}
                 Contesto del canale:
                 {await ws.TranscriptAsync(job.ChannelId)}
                 {await TeamAsync(job.Agent, job.ChannelId)}
                 Se serve, affida parti del lavoro agli altri agenti con ask_agent e usa le loro risposte.
-                Alla fine rispondi solo con il risultato completo del task, senza ripetere la richiesta né il tuo nome.
+                Se ti serve una decisione o un'informazione da chi ha chiesto il lavoro, oppure ti ha chiesto di controllare il risultato
+                prima di chiuderlo, inizia la risposta con "{HandMarker}" e scrivi cosa gli serve fare (o il risultato da controllare).
+                Altrimenti rispondi solo con il risultato completo del task, senza ripetere la richiesta né il tuo nome.
                 """;
-            var result = await runtime.AskAsync(job.Agent, prompt, ct, new AgentCall(job.ChannelId, 0, $"{task.Title}\n{task.Description}"));
+            var result = (await runtime.AskAsync(job.Agent, prompt, ct, new AgentCall(job.ChannelId, 0, $"{task.Title}\n{task.Description}"))).Trim();
             if (result.Length == 0) result = "(nessun risultato)";
+            if (result.StartsWith(HandMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                var note = result[HandMarker.Length..].Trim();
+                await ws.HandToRequesterAsync(taskId, note);
+                await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, $"@{task.CreatedBy.Split('@')[0]} il task #{task.Id} passa a te:\n{note}", WorkspaceStore.NoMentions, parentId: task.MessageId);
+                return;
+            }
             await ws.FinishTaskAsync(taskId, WorkStatus.Done, result);
-            await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, $"Task #{task.Id} «{task.Title}» completato:\n{result}", job.Depth);
+            if (task.MessageId is { } r) await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, result, WorkspaceStore.NoMentions, parentId: r);
+            else await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, $"Task #{task.Id} «{task.Title}» completato:\n{result}", job.Depth);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

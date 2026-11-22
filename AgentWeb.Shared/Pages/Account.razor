@@ -17,7 +17,7 @@
         <div class="card-block">
             <div class="profile">
                 @if (profile.Avatar is { } src) { <img class="profile-photo" src="@src" alt="Foto profilo" /> }
-                else { <span class="avatar profile-avatar" aria-hidden="true">@Initials(profile.UserName)</span> }
+                else { <span class="avatar profile-avatar" style="@AvatarColor.Style(profile.UserName)" aria-hidden="true">@Initials(profile.UserName)</span> }
                 <div class="profile-id">
                     <div class="profile-name">@(profile.DisplayName ?? Handle(profile.UserName))</div>
                     <div class="profile-handle">@@@Handle(profile.UserName)</div>

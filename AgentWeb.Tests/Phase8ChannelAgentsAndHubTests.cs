@@ -53,6 +53,35 @@ public sealed class Phase8ChannelAgentsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MessageAsTask_AgentConfirmsWorksAndDeliversInTheThread_AndResumesOnReply()
+    {
+        // Senza agenti nel canale il task resta da assegnare.
+        var free = (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/tasks/from-text", new { text = "Prepara la scaletta" })).Content.ReadFromJsonAsync<TaskDto>())!;
+        Assert.Null(free.Assignee);
+        Assert.NotNull(free.MessageId);
+        (await alice.PostAsJsonAsync($"/api/workspace/tasks/{free.Id}/status", new { status = WorkStatus.Closed })).EnsureSuccessStatusCode();
+
+        Assert.Equal(HttpStatusCode.NoContent, (await AddAgent(alice, "Esperto")).StatusCode);
+        var request = (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/tasks/from-text", new { text = "Mappa i moduli del progetto" })).Content.ReadFromJsonAsync<TaskDto>())!;
+        Assert.Equal(("Esperto", true, "Esperto", "Mappa i moduli del progetto"), (request.Assignee, request.AssigneeIsAgent, request.Agent, request.Title));
+
+        var thread = await WaitForAsync(m => m.Count(x => x.ParentId == request.MessageId && x.Author == "Esperto") >= 2);
+        var replies = thread.Where(x => x.ParentId == request.MessageId).Select(x => x.Text).ToList();
+        Assert.StartsWith($"Lo prendo io come task #{request.Id}", replies[0]);
+        Assert.Equal("risposta dell'esperto", replies[1]); // il risultato sta nel thread della richiesta
+        for (var i = 0; i < 50 && (await Task1Of(request.Id)).Status != WorkStatus.Done; i++) await Task.Delay(100);
+        Assert.Equal(WorkStatus.Done, (await Task1Of(request.Id)).Status);
+
+        // Un messaggio ha un solo task; una correzione nel thread rimette l'agente al lavoro.
+        Assert.Equal(request.Id, (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/messages/{request.MessageId}/task", new { })).Content.ReadFromJsonAsync<TaskDto>())!.Id);
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/messages", new NewMessageRequest("aggiungi anche le dipendenze", ParentId: request.MessageId))).EnsureSuccessStatusCode();
+        await WaitForAsync(m => m.Count(x => x.ParentId == request.MessageId && x.Text == "risposta dell'esperto") >= 2);
+        Assert.Equal(WorkStatus.Done, (await Task1Of(request.Id)).Status);
+    }
+
+    async Task<TaskDto> Task1Of(int id) => (await alice.GetFromJsonAsync<List<TaskDto>>($"/api/workspace/channels/{channel}/tasks"))!.Single(t => t.Id == id);
+
+    [Fact]
     public async Task OnlyTheCreator_ChoosesTheAgents()
     {
         Assert.Equal(HttpStatusCode.Forbidden, (await AddAgent(bob, "Esperto")).StatusCode);
@@ -226,4 +255,54 @@ public sealed class Phase8MigrationTests : IDisposable
     }
 
     public void Dispose() => TestDb.Drop(database);
+}
+
+// L'agente che ha bisogno di una decisione passa il task a chi l'ha chiesto; la risposta nel thread glielo restituisce.
+public sealed class TaskHandBackTests
+{
+    [Fact]
+    public async Task AgentHandsTaskToRequester_AndAnswerInThreadGivesItBack()
+    {
+        await using var llm = await FakeLlm.StartAsync("PER TE: preferisci PDF o Markdown?");
+        using var app = new TestApp();
+        var settings = new AgentSettings { LocalAgents = [new() { Name = "Cindy", Prompt = "Ricerche.", Llm = new() { Kind = LlmKinds.OpenAI, Url = llm.Url + "/v1", ApiKey = "k", DefaultModel = "m" } }] };
+        await File.WriteAllTextAsync(Path.Combine(app.Dir, "agentsettings.json"), JsonSerializer.Serialize(settings));
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var channel = (await (await alice.PostAsJsonAsync("/api/workspace/channels", new NewChannelRequest("ricerca"))).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/agents", new { name = "Cindy" })).EnsureSuccessStatusCode();
+
+        var task = (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/tasks/from-text", new { text = "Riassumi le trimestrali" })).Content.ReadFromJsonAsync<TaskDto>())!;
+        async Task<TaskDto> Current() => (await alice.GetFromJsonAsync<List<TaskDto>>($"/api/workspace/channels/{channel}/tasks"))!.Single();
+        for (var i = 0; i < 100 && (await Current()).Assignee != "alice@test.it"; i++) await Task.Delay(100);
+        var handed = await Current();
+        Assert.Equal(("alice@test.it", false, WorkStatus.Todo, "Cindy"), (handed.Assignee, handed.AssigneeIsAgent, handed.Status, handed.Agent));
+        var messages = (await alice.GetFromJsonAsync<List<MessageDto>>($"/api/workspace/channels/{channel}/messages"))!;
+        Assert.Contains(messages, m => m.ParentId == task.MessageId && m.Text.Contains("passa a te") && m.Text.Contains("PDF o Markdown"));
+
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/messages", new NewMessageRequest("Markdown", ParentId: task.MessageId))).EnsureSuccessStatusCode();
+        for (var i = 0; i < 100 && llm.Requests.Count < 2; i++) await Task.Delay(100);
+        Assert.True(llm.Requests.Count >= 2); // l'agente è ripartito con la risposta
+    }
+
+    [Fact]
+    public async Task MentionedAgent_TakesRealWorkAsTask()
+    {
+        await using var llm = await FakeLlm.StartAsync("TASK: preparo la mappa dei moduli");
+        using var app = new TestApp();
+        var settings = new AgentSettings { LocalAgents = [new() { Name = "Cindy", Prompt = "Ricerche.", Llm = new() { Kind = LlmKinds.OpenAI, Url = llm.Url + "/v1", ApiKey = "k", DefaultModel = "m" } }] };
+        await File.WriteAllTextAsync(Path.Combine(app.Dir, "agentsettings.json"), JsonSerializer.Serialize(settings));
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var channel = (await (await alice.PostAsJsonAsync("/api/workspace/channels", new NewChannelRequest("codice"))).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/agents", new { name = "Cindy" })).EnsureSuccessStatusCode();
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/messages", new NewMessageRequest("@Cindy mappa i moduli del progetto"))).EnsureSuccessStatusCode();
+
+        List<TaskDto> tasks = [];
+        for (var i = 0; i < 100 && tasks.Count == 0; i++) { await Task.Delay(100); tasks = (await alice.GetFromJsonAsync<List<TaskDto>>($"/api/workspace/channels/{channel}/tasks"))!; }
+        var t = Assert.Single(tasks);
+        Assert.Equal(("Cindy", "alice@test.it"), (t.Agent, t.CreatedBy)); // la richiesta resta di chi l'ha fatta
+        var messages = (await alice.GetFromJsonAsync<List<MessageDto>>($"/api/workspace/channels/{channel}/messages"))!;
+        Assert.Contains(messages, m => m.ParentId == t.MessageId && m.Text == $"Lo prendo io come task #{t.Id}.\npreparo la mappa dei moduli");
+    }
 }

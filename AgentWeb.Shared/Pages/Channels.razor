@@ -120,7 +120,7 @@
             @if (current.IsPrivate)
             {
                 <form @onsubmit="AddMemberAsync" class="members">
-                    @foreach (var m in members) { <span class="chip"><span class="avatar" style="--size: 1.25rem">@Initials(m)</span>@m</span> }
+                    @foreach (var m in members) { <span class="chip"><span class="avatar" style="@AvatarColor.Style(m, "1.25rem")">@Initials(m)</span>@m</span> }
                     <input class="form-control form-control-sm" @bind="newMember" @bind:event="oninput" placeholder="Aggiungi per email" aria-label="Utente da aggiungere" />
                     <button class="btn btn-outline-secondary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newMember)">Aggiungi</button>
                 </form>
@@ -161,7 +161,7 @@
                         }
                         @foreach (var p in peopleTyping.Keys)
                         {
-                            <div class="typing fade-in"><span class="avatar" style="--size: 1.5rem">@Initials(p)</span>@p sta scrivendo <span class="typing-dots"><i></i><i></i><i></i></span></div>
+                            <div class="typing fade-in"><span class="avatar" style="@AvatarColor.Style(p, "1.5rem")">@Initials(p)</span>@p sta scrivendo <span class="typing-dots"><i></i><i></i><i></i></span></div>
                         }
                     </div>
                 </div>
@@ -184,6 +184,12 @@
                     </ul>
                 }
                 <form @onsubmit="SendAsync" class="composer">
+                    @if (replyTo is null)
+                    {
+                        <label class="as-task" title="Il messaggio diventa un task: lo prende l'agente menzionato (o l'unico del canale)">
+                            <input type="checkbox" @bind="asTask" /> Come task
+                        </label>
+                    }
                     <textarea class="form-control" rows="1" @ref="composer" @bind="draft" @bind:event="oninput" @bind:after="OnDraftChanged" maxlength="4000" aria-label="Messaggio"
                               placeholder="Scrivi a #@current.Name — @@Agente per coinvolgere un agente"></textarea>
                     <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="Invia">
@@ -310,7 +316,14 @@
 
     int OpenTasks => tasks.Count(t => t.Status is WorkStatus.Todo or WorkStatus.InProgress);
 
-    long? replyTo;            // radice del thread a cui risponde il composer
+    long? replyTo;
+    bool asTask;              // "Come task" nel composer
+
+    Task TaskFromMessageAsync(MessageDto m) => Run(async () =>
+    {
+        var t = await Ws.CreateTaskFromMessageAsync(m.ChannelId, m.Id);
+        if (tasks.All(x => x.Id != t.Id)) tasks.Add(t); // l'evento "task" lo aggiunge comunque; così compare subito
+    });            // radice del thread a cui risponde il composer
     long lastMarked;          // ultimo id segnato come letto sul server (evita una richiesta per ogni evento)
     string searchQuery = "", searchedFor = "";
     List<SearchHitDto>? searchResults;
@@ -330,7 +343,7 @@
                 else
                 {
                     @if (x.M.Kind == AuthorKind.Agent) { @AgentAvatar(x.M.Author, "2rem") }
-                    else { <span class="avatar" aria-hidden="true">@Initials(x.M.Author)</span> }
+                    else { <span class="avatar" style="@AvatarColor.Style(x.M.Author)" aria-hidden="true">@Initials(x.M.Author)</span> }
                 }
                 <div class="msg-body">
                     @if (!x.Grouped)
@@ -343,8 +356,23 @@
                         </div>
                     }
                     <div class="msg-text">@x.M.Text</div>
+                    @foreach (var t in tasks.Where(t => t.MessageId == x.M.Id))
+                    {
+                        @* Il task della richiesta: il suo lavoro e il risultato stanno nel thread di questo messaggio. *@
+                        <button type="button" class="msg-task" @onclick="() => StartReply(x.M)" title="Apri il thread del task">
+                            <span class="sq st-@t.Status" aria-hidden="true"></span>
+                            <span>Task #@t.Id · @Label(t.Status)</span>
+                            @if (t.Assignee is { } who) { <span class="msg-task-who">· @(t.AssigneeIsAgent ? who : who.Split('@')[0])</span> }
+                        </button>
+                    }
                 </div>
-                <button type="button" class="msg-reply" @onclick="() => StartReply(x.M)" aria-label="Rispondi nel thread">Rispondi</button>
+                <span class="msg-actions">
+                    @if (x.M.ParentId is null && tasks.All(t => t.MessageId != x.M.Id))
+                    {
+                        <button type="button" class="msg-reply" @onclick="() => TaskFromMessageAsync(x.M)" aria-label="Crea task dal messaggio">Task</button>
+                    }
+                    <button type="button" class="msg-reply" @onclick="() => StartReply(x.M)" aria-label="Rispondi nel thread">Rispondi</button>
+                </span>
             </article>
         }
     </text>;
@@ -519,7 +547,8 @@
         lastTypingSent = default;
         var parent = replyTo;
         replyTo = null;
-        await Ws.SendMessageAsync(current.Id, text, parent); // sull'hub; il messaggio arriva poi come evento, a tutti i client
+        if (asTask && parent is null) { asTask = false; await Ws.SendAsTaskAsync(current.Id, text); } // messaggio e task tornano come eventi
+        else await Ws.SendMessageAsync(current.Id, text, parent); // sull'hub; il messaggio arriva poi come evento, a tutti i client
         _ = Ws.SetTypingAsync(current.Id, false);
     });
 

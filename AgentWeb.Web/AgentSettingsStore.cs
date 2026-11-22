@@ -10,11 +10,16 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
     readonly string path = config["AgentSettings:Path"] ?? Path.Combine(env.ContentRootPath, "agentsettings.json");
     readonly Lock gate = new();
     string? cached; // testo del file: rileggerlo a ogni job serializzava gli agenti in parallelo sul lock
+    DateTime cachedAt; // ora di modifica del file letto: se cambia (altra replica, modifica a mano) si rilegge
 
-    // shortcut: modifiche fatte a mano al file mentre il server gira non si vedono fino al riavvio (o al prossimo Save).
     string? Text()
     {
-        lock (gate) return cached ??= File.Exists(path) ? File.ReadAllText(path) : null;
+        lock (gate)
+        {
+            var stamp = File.GetLastWriteTimeUtc(path); // stat economico; file assente = data fissa del 1601
+            if (cached is null || stamp != cachedAt) { cached = File.Exists(path) ? File.ReadAllText(path) : null; cachedAt = stamp; }
+            return cached;
+        }
     }
 
     public bool AllowStdio => env.IsDevelopment(); // stdio esegue comandi sul server: mai esporlo fuori da Development
@@ -39,6 +44,7 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
             File.WriteAllText(tmp, text);
             File.Move(tmp, path, overwrite: true); // scrittura atomica: niente file troncato se il processo cade
             cached = text;
+            cachedAt = File.GetLastWriteTimeUtc(path);
         }
         icons.For(settings.LocalAgents.Where(a => a.Enabled)); // agenti nuovi: l'icona si disegna subito, in background
     }

@@ -334,6 +334,10 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
     public Task<List<string>> GetPeopleAsync() => GetAsync<List<string>>("api/workspace/people");
     public Task<List<TaskDto>> GetAllTasksAsync() => GetAsync<List<TaskDto>>("api/workspace/tasks");
     public Task<List<TaskDto>> GetTasksAsync(int channelId) => GetAsync<List<TaskDto>>($"api/workspace/channels/{channelId}/tasks");
+    public Task<TaskDto> CreateTaskFromMessageAsync(int channelId, long messageId) =>
+        PostAsync<TaskDto>($"api/workspace/channels/{channelId}/messages/{messageId}/task", new { });
+    public Task<TaskDto> SendAsTaskAsync(int channelId, string text) =>
+        PostAsync<TaskDto>($"api/workspace/channels/{channelId}/tasks/from-text", new { text });
     public Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task) => PostAsync<TaskDto>($"api/workspace/channels/{channelId}/tasks", task);
     public Task SetTaskStatusAsync(int taskId, WorkStatus status) => PostAsync<object?>($"api/workspace/tasks/{taskId}/status", new { status });
     public Task<List<string>> GetAgentsAsync() => GetAsync<List<string>>("api/workspace/agents");

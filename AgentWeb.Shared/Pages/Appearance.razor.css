@@ -8,9 +8,9 @@
 .theme-preview { display: grid; grid-template-columns: 1fr 2fr; grid-template-rows: 1fr 1fr; gap: 4px; height: 70px; padding: 6px; border-radius: 8px; margin-bottom: .45rem; border: 1px solid var(--border); }
 .theme-preview span { border-radius: 4px; }
 .theme-preview span:first-child { grid-row: span 2; }
-.theme-light { background: #f7f7f6; }
+.theme-light { background: #f3efff; }
 .theme-light span { background: #e4e4e1; }
-.theme-dark { background: #0c0c0d; }
+.theme-dark { background: #1a1340; }
 .theme-dark span { background: #262628; }
-.theme-system { background: linear-gradient(135deg, #f7f7f6 50%, #0c0c0d 50%); }
+.theme-system { background: linear-gradient(135deg, #f3efff 50%, #1a1340 50%); }
 .theme-system span { background: color-mix(in srgb, #808080 45%, transparent); }

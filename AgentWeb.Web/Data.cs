@@ -153,6 +153,8 @@ public sealed class TaskEntity
     public string? Result { get; set; }
     public string CreatedBy { get; set; } = "";
     public DateTimeOffset UpdatedAt { get; set; }
+    public long? MessageId { get; set; } // messaggio da cui nasce: il suo thread è la conversazione del task
+    public string? Agent { get; set; }   // agente che ci lavora (resta anche se passa il task a una persona)
 }
 
 public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<AppUser>(options)

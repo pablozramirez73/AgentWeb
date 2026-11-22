@@ -33,9 +33,9 @@
 /* Colori degli stati */
 .sq { width: .7rem; height: .7rem; border-radius: 2px; flex: 0 0 auto; display: inline-block; }
 .st-Backlog { border: 1.5px solid var(--muted); }
-.st-Todo { background: #e8702a; }
-.st-InProgress { background: #3ea6e0; }
-.st-Done { background: #3aa65b; }
+.st-Todo { background: var(--warning); }
+.st-InProgress { background: var(--info); }
+.st-Done { background: var(--success); }
 .st-Closed { background: #8a8a8f; }
 .st-Failed { background: #d64545; }
 .status-pick.failed { border-color: #d64545; }

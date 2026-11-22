@@ -97,7 +97,7 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
         var until = Now + poll;
         // Una volta per poll: resta "vivo" per poll + lease, e il daemon ne fa subito un altro.
         await using (var db = await dbf.CreateDbContextAsync())
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
+            await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "DaemonMachines" ("Sid", "Owner", "Name", "Runtimes", "LastSeen") VALUES ({sid}, {o}, {name}, {runtimes}, {Now})
                 ON CONFLICT ("Sid") DO UPDATE SET "Name" = EXCLUDED."Name", "Runtimes" = EXCLUDED."Runtimes", "LastSeen" = EXCLUDED."LastSeen"
                 """, ct);
@@ -107,7 +107,7 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
             {
                 var leaseUntil = Now + lease;
                 // Le riconsegne (Attempts > 0) passano per prime; SKIP LOCKED: due daemon non prendono la stessa consegna.
-                var taken = await db.DaemonDeliveries.FromSqlInterpolated($"""
+                var taken = await db.DaemonDeliveries.FromSql($"""
                     UPDATE "DaemonDeliveries" SET "Sid" = {sid}, "LeaseUntil" = {leaseUntil}, "Attempts" = "Attempts" + 1
                     WHERE "Id" = (SELECT "Id" FROM "DaemonDeliveries"
                                   WHERE "Owner" = {o} AND "Sid" IS NULL AND NOT "Done" AND "Runtime" = ANY({runtimes})

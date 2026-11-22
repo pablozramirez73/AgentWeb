@@ -30,8 +30,10 @@ public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Re
 // Last: l'ultimo messaggio (del canale fuori dai thread, oppure del thread). Unread: messaggi altrui non ancora letti.
 public sealed record FeedItemDto(int ChannelId, string Channel, bool IsPrivate, MessageDto? Root, MessageDto Last, int Replies, int Unread, string? With = null);
 
+// MessageId: il messaggio da cui nasce il task (il suo thread è la conversazione del task); Agent: l'agente che ci lavora,
+// anche quando ha passato il task a una persona per una decisione (una risposta nel thread glielo restituisce).
 public sealed record TaskDto(int Id, int ChannelId, string Title, string Description, string? Assignee, bool AssigneeIsAgent,
-    WorkStatus Status, string? Result, string CreatedBy, DateTimeOffset UpdatedAt);
+    WorkStatus Status, string? Result, string CreatedBy, DateTimeOffset UpdatedAt, long? MessageId = null, string? Agent = null);
 
 public sealed record NewTaskRequest(string Title, string Description, string? Assignee)
 {
@@ -98,6 +100,8 @@ public interface IWorkspaceClient
     Task<ChannelDto> OpenDirectAsync(string with); // conversazione diretta con una persona (email) o un agente: la crea la prima volta
     Task<List<string>> GetPeopleAsync();          // persone viste nei canali che l'utente vede (per scegliere a chi scrivere) // pagina Task: tutti i task dei canali visibili, aggiornati di recente per primi
     Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task);
+    Task<TaskDto> CreateTaskFromMessageAsync(int channelId, long messageId); // lo prende l'agente menzionato (o l'unico del canale)
+    Task<TaskDto> SendAsTaskAsync(int channelId, string text);              // "Come task": messaggio e task insieme
     Task SetTaskStatusAsync(int taskId, WorkStatus status);
     Task<List<string>> GetAgentsAsync();
     Task<Dictionary<string, string>> GetAgentIconsAsync(); // nome agente -> SVG quadrato (da mostrare solo come <img>)

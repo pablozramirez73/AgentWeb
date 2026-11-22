@@ -16,6 +16,7 @@ public static class AgentApi
     public const string ChatRateLimit = "chat";
 
     sealed record NameBody(string Name);
+    sealed record TextBody(string Text);
     sealed record StatusBody(WorkStatus Status);
     sealed record DocumentBody(string FileName, string Text);
 
@@ -88,6 +89,8 @@ public static class AgentApi
         ws.MapGet("/people", (WorkspaceStore s, ClaimsPrincipal u) => s.GetPeopleAsync(User(u)));
         ws.MapGet("/channels/{id:int}/tasks", (int id, WorkspaceStore s, ClaimsPrincipal u) => s.GetTasksAsync(id, User(u)));
         ws.MapPost("/channels/{id:int}/tasks", (int id, NewTaskRequest t, WorkspaceStore s, ClaimsPrincipal u) => s.CreateTaskAsync(id, t, User(u)));
+        ws.MapPost("/channels/{id:int}/messages/{mid:long}/task", (int id, long mid, WorkspaceStore s, ClaimsPrincipal u) => s.CreateTaskFromMessageAsync(id, mid, User(u)));
+        ws.MapPost("/channels/{id:int}/tasks/from-text", (int id, TextBody b, WorkspaceStore s, ClaimsPrincipal u) => s.SendAsTaskAsync(id, User(u), b.Text));
         ws.MapPost("/tasks/{id:int}/status", async (int id, StatusBody b, WorkspaceStore s, ClaimsPrincipal u) =>
         {
             await s.SetStatusByUserAsync(id, b.Status, User(u));

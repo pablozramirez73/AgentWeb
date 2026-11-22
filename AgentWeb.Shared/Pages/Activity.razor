@@ -149,7 +149,7 @@
                     @foreach (var p in people.Take(3))
                     {
                         if (p.Kind == AuthorKind.Agent) { @AgentAvatar(p.Author, "1.6rem") }
-                        else { <span class="avatar" style="--size: 1.6rem">@Initials(p.Author)</span> }
+                        else { <span class="avatar" style="@AvatarColor.Style(p.Author, "1.6rem")">@Initials(p.Author)</span> }
                     }
                     @if (people.Count > 3) { <span class="people-more">+@(people.Count - 3)</span> }
                 </span>

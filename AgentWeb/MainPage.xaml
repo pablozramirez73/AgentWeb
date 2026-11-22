@@ -1,7 +1,7 @@
 ﻿<ContentPage xmlns:local="clr-namespace:AgentWeb"
              xmlns:shared="clr-namespace:AgentWeb.Shared;assembly=AgentWeb.Shared"
              x:Class="AgentWeb.MainPage"
-             BackgroundColor="{DynamicResource PageBackgroundColor}">
+             BackgroundColor="{AppThemeBinding Light=#f3efff, Dark=#1a1340}"><!-- sfondo finché Blazor non carica: gli stessi colori di sfondo di AgentWeb.Shared/wwwroot/app.css -->
 
     <BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
         <BlazorWebView.RootComponents>
