@@ -305,4 +305,25 @@ public sealed class TaskHandBackTests
         var messages = (await alice.GetFromJsonAsync<List<MessageDto>>($"/api/workspace/channels/{channel}/messages"))!;
         Assert.Contains(messages, m => m.ParentId == t.MessageId && m.Text == $"Lo prendo io come task #{t.Id}.\npreparo la mappa dei moduli");
     }
+
+    // In un messaggio diretto con l'agente non c'è la @menzione: la richiesta è il messaggio che l'ha attivato.
+    [Fact]
+    public async Task DirectMessage_RealWork_BecomesATask_NotARawMarker()
+    {
+        await using var llm = await FakeLlm.StartAsync("TASK: preparo la mappa dei moduli");
+        using var app = new TestApp();
+        var settings = new AgentSettings { LocalAgents = [new() { Name = "Cindy", Prompt = "Ricerche.", Llm = new() { Kind = LlmKinds.OpenAI, Url = llm.Url + "/v1", ApiKey = "k", DefaultModel = "m" } }] };
+        await File.WriteAllTextAsync(Path.Combine(app.Dir, "agentsettings.json"), JsonSerializer.Serialize(settings));
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var dm = (await (await alice.PostAsJsonAsync("/api/workspace/direct", new { name = "Cindy" })).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        (await alice.PostAsJsonAsync($"/api/workspace/channels/{dm}/messages", new NewMessageRequest("mappa i moduli del progetto"))).EnsureSuccessStatusCode();
+
+        List<TaskDto> tasks = [];
+        for (var i = 0; i < 100 && tasks.Count == 0; i++) { await Task.Delay(100); tasks = (await alice.GetFromJsonAsync<List<TaskDto>>($"/api/workspace/channels/{dm}/tasks"))!; }
+        var t = Assert.Single(tasks);
+        Assert.Equal(("Cindy", "alice@test.it"), (t.Agent, t.CreatedBy));
+        var messages = (await alice.GetFromJsonAsync<List<MessageDto>>($"/api/workspace/channels/{dm}/messages"))!;
+        Assert.Equal($"Lo prendo io come task #{t.Id}.\npreparo la mappa dei moduli", messages.First(m => m.Author == "Cindy").Text); // non "TASK: …"
+    }
 }

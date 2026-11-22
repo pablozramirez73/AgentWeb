@@ -207,13 +207,17 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
             Se manca qualcosa per capire la richiesta, chiedilo invece di prenderla.
             {await TeamAsync(job.Agent, job.ChannelId)}
             """;
-        var request = (await ws.LatestMessagesAsync(job.ChannelId, 5)).LastOrDefault(m => m.Text.Contains('@' + job.Agent, StringComparison.OrdinalIgnoreCase));
+        var request = job.MessageId is { } id ? await ws.MessageAsync(job.ChannelId, id)
+            : (await ws.LatestMessagesAsync(job.ChannelId, 5)).LastOrDefault(m => m.Text.Contains('@' + job.Agent, StringComparison.OrdinalIgnoreCase));
         var focus = request?.Text;
         var reply = await runtime.AskAsync(job.Agent, prompt, ct, new AgentCall(job.ChannelId, 0, focus));
         // Lavoro vero: diventa un task della richiesta (conferma nel suo thread, poi il lavoro parte dalla coda).
-        if (reply.TrimStart().StartsWith(TakeMarker, StringComparison.OrdinalIgnoreCase) && request is not null
-            && await ws.TakeAsTaskAsync(job.ChannelId, job.Agent, request.Id, reply.TrimStart()[TakeMarker.Length..]) is not null)
-            return;
+        if (reply.TrimStart().StartsWith(TakeMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            var plan = reply.TrimStart()[TakeMarker.Length..].Trim();
+            if (request is not null && await ws.TakeAsTaskAsync(job.ChannelId, job.Agent, request.Id, plan) is not null) return;
+            reply = plan; // task non creabile (es. la richiesta ne ha già uno): resta il piano, mai il marcatore grezzo
+        }
         await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, reply.Length > 0 ? reply : "(nessuna risposta)", job.Depth, parentId: job.ParentId);
     }
 

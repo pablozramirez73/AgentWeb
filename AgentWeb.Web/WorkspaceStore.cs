@@ -19,7 +19,8 @@ public sealed class WorkspaceBus
     }
 }
 
-public sealed record AgentJob(int ChannelId, string Agent, int? TaskId, int Depth, long? ParentId = null); // ParentId: risponde in quel thread
+// ParentId: risponde in quel thread. MessageId: il messaggio che l'ha attivato (la richiesta, anche senza @menzione nei messaggi diretti).
+public sealed record AgentJob(int ChannelId, string Agent, int? TaskId, int Depth, long? ParentId = null, long? MessageId = null);
 
 public sealed class AgentQueue
 {
@@ -353,10 +354,10 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             }
             if (kind == AuthorKind.User && await DirectAgentAsync(channelId) is { } direct && inChannel.Contains(direct, StringComparer.OrdinalIgnoreCase)
                 && !Mentions(text).Contains(direct, StringComparer.OrdinalIgnoreCase))
-                queue.Enqueue(new(channelId, direct, null, depth + 1, parentId)); // in un messaggio diretto con un agente non serve la @menzione
+                queue.Enqueue(new(channelId, direct, null, depth + 1, parentId, dto.Id)); // in un messaggio diretto con un agente non serve la @menzione
             foreach (var agent in Mentions(text).Where(a => !a.Equals(author, StringComparison.OrdinalIgnoreCase) && !a.Equals(resumed, StringComparison.OrdinalIgnoreCase)))
             {
-                if (inChannel.Contains(agent, StringComparer.OrdinalIgnoreCase)) queue.Enqueue(new(channelId, agent, null, depth + 1, parentId));
+                if (inChannel.Contains(agent, StringComparer.OrdinalIgnoreCase)) queue.Enqueue(new(channelId, agent, null, depth + 1, parentId, dto.Id));
                 else if (kind == AuthorKind.User)
                     await PostAsync(channelId, "Sistema", AuthorKind.System, $"@{agent} non è in questo canale: chi l'ha creato può aggiungerlo.", parentId: parentId);
             }
@@ -463,6 +464,12 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     }
 
     // Per gli strumenti nativi degli agenti (autorità interna, sempre sul canale in cui l'agente lavora).
+    public async Task<MessageDto?> MessageAsync(int channelId, long id)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        return await db.Messages.FirstOrDefaultAsync(m => m.Id == id && m.ChannelId == channelId) is { } m ? ToDto(m) : null;
+    }
+
     public async Task<List<MessageDto>> LatestMessagesAsync(int channelId, int take)
     {
         await using var db = await dbf.CreateDbContextAsync();
