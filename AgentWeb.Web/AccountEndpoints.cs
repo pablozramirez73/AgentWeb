@@ -126,6 +126,9 @@ public static class AccountEndpoints
             <title>Accedi · AgentWeb</title>
             <link rel="stylesheet" href="/_content/AgentWeb.Shared/lib/bootstrap/dist/css/bootstrap.min.css" />
             <link rel="stylesheet" href="/_content/AgentWeb.Shared/app.css" />
+            <link rel="manifest" href="/_content/AgentWeb.Shared/manifest.webmanifest" />
+            <link rel="apple-touch-icon" href="/_content/AgentWeb.Shared/icon-180.png" />
+            <meta name="apple-mobile-web-app-title" content="AgentWeb" />
             <style>
               .login { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem; }
               .login-card { width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 2rem 1.75rem; box-shadow: var(--shadow); }
