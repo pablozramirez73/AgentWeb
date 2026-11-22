@@ -6,6 +6,16 @@ async function registration() {
     return navigator.serviceWorker.register(new URL(sw, document.baseURI).href);
 }
 
+// Non navigator.serviceWorker.ready: si risolve solo per un worker che controlla questa pagina, e il nostro ha scope
+// /_content/AgentWeb.Shared/, quindi resterebbe in attesa per sempre. Per iscriversi basta che questa registrazione sia attiva.
+async function activated(reg) {
+    const w = reg.installing || reg.waiting || reg.active;
+    if (!w || w.state === "activated") return;
+    const done = new Promise(resolve => w.addEventListener("statechange", () => { if (w.state === "activated") resolve(); }));
+    const late = new Promise((_, reject) => setTimeout(() => reject(new Error("Il browser non ha attivato il servizio per le notifiche: ricarica la pagina e riprova.")), 15000));
+    await Promise.race([done, late]);
+}
+
 function keyBytes(base64url) {
     const s = atob(base64url.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(base64url.length / 4) * 4, "="));
     return Uint8Array.from(s, c => c.charCodeAt(0));
@@ -28,7 +38,7 @@ export async function current() {
 export async function subscribe(vapidPublicKey) {
     const reg = await registration();
     if (!reg || await Notification.requestPermission() !== "granted") return null;
-    await navigator.serviceWorker.ready;
+    await activated(reg);
     let sub = await reg.pushManager.getSubscription();
     // Chiave del server cambiata: la vecchia iscrizione non funzionerebbe più.
     const key = keyBytes(vapidPublicKey);
