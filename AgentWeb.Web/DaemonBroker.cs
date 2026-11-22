@@ -18,6 +18,8 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
 {
     const int MaxAttempts = 3;
     static readonly TimeSpan Tick = TimeSpan.FromSeconds(1);
+    // Chi aspetta la risposta si fa vedere a ogni tick: oltre questo silenzio la sua replica è caduta e la consegna non serve più.
+    static readonly TimeSpan WaiterGrace = TimeSpan.FromSeconds(10);
     readonly TimeSpan lease = TimeSpan.FromSeconds(config.GetValue("Agents:DaemonLeaseSeconds", 30));
     readonly TimeSpan poll = TimeSpan.FromSeconds(config.GetValue("Agents:DaemonPollSeconds", 25));
     readonly TimeSpan timeout = TimeSpan.FromMinutes(config.GetValue("Agents:DaemonTimeoutMinutes", 15.0));
@@ -29,6 +31,7 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
 
     // Vivo = ha fatto un poll o un heartbeat da poco (un poll dura al massimo "poll", poi il daemon ne fa subito un altro).
     DateTimeOffset AliveSince => Now - poll - lease;
+    DateTimeOffset WaiterSince => Now - WaiterGrace;
 
     IQueryable<DaemonMachineEntity> Alive(AppDb db, string owner)
     {
@@ -64,7 +67,7 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
         var id = Guid.NewGuid().ToString("N");
         await using (var db = await dbf.CreateDbContextAsync())
         {
-            db.DaemonDeliveries.Add(new() { Id = id, Owner = Key(owner), Runtime = Key(runtime), Prompt = prompt, CreatedAt = Now });
+            db.DaemonDeliveries.Add(new() { Id = id, Owner = Key(owner), Runtime = Key(runtime), Prompt = prompt, CreatedAt = Now, WaiterSeenAt = Now });
             await db.SaveChangesAsync(CancellationToken.None);
         }
         Signal();
@@ -75,6 +78,8 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
             {
                 await WaitAsync(Tick, ct);
                 await using var db = await dbf.CreateDbContextAsync();
+                var seen = Now;
+                await db.DaemonDeliveries.Where(d => d.Id == id).ExecuteUpdateAsync(s => s.SetProperty(d => d.WaiterSeenAt, seen), ct);
                 var w = await db.DaemonDeliveries.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, ct)
                     ?? throw new InvalidOperationException("consegna al daemon persa.");
                 if (w.Done)
@@ -105,12 +110,12 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
         {
             await using (var db = await dbf.CreateDbContextAsync())
             {
-                var leaseUntil = Now + lease;
+                var (leaseUntil, waiterSince) = (Now + lease, WaiterSince);
                 // Le riconsegne (Attempts > 0) passano per prime; SKIP LOCKED: due daemon non prendono la stessa consegna.
                 var taken = await db.DaemonDeliveries.FromSql($"""
                     UPDATE "DaemonDeliveries" SET "Sid" = {sid}, "LeaseUntil" = {leaseUntil}, "Attempts" = "Attempts" + 1
                     WHERE "Id" = (SELECT "Id" FROM "DaemonDeliveries"
-                                  WHERE "Owner" = {o} AND "Sid" IS NULL AND NOT "Done" AND "Runtime" = ANY({runtimes})
+                                  WHERE "Owner" = {o} AND "Sid" IS NULL AND NOT "Done" AND "Runtime" = ANY({runtimes}) AND "WaiterSeenAt" > {waiterSince}
                                   ORDER BY "Attempts" DESC, "CreatedAt" LIMIT 1 FOR UPDATE SKIP LOCKED)
                     RETURNING *
                     """).AsNoTracking().ToListAsync(ct);
@@ -162,8 +167,9 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
         await db.DaemonDeliveries.Where(d => d.Sid != null && !d.Done && d.LeaseUntil < now && d.Attempts >= MaxAttempts)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Done, true).SetProperty(d => d.Attempts, MaxAttempts + 1)
                 .SetProperty(d => d.Error, $"consegna abbandonata {MaxAttempts} volte dal daemon."), ct);
-        var stale = now - timeout - lease;
-        await db.DaemonDeliveries.Where(d => d.CreatedAt < stale).ExecuteDeleteAsync(ct);
+        // Senza più chi aspetta (replica caduta): via subito, così nessun daemon la esegue e chi la sta eseguendo si ferma (heartbeat false).
+        var (stale, orphan) = (now - timeout - lease, WaiterSince);
+        await db.DaemonDeliveries.Where(d => d.CreatedAt < stale || d.WaiterSeenAt < orphan).ExecuteDeleteAsync(ct);
         var gone = now - TimeSpan.FromHours(1);
         await db.DaemonMachines.Where(m => m.LastSeen < gone).ExecuteDeleteAsync(ct);
         if (requeued > 0) Signal();

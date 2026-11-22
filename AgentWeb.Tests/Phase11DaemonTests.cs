@@ -5,6 +5,8 @@ using System.Text.Json;
 using AgentWeb.Cli;
 using AgentWeb.Shared.Agents;
 using AgentWeb.Shared.Workspace;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentWeb.Tests;
 
@@ -210,6 +212,23 @@ public sealed class Phase11DaemonTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, (await alice.PostAsJsonAsync($"/api/daemon/deliveries/{again.Id}/complete", new DaemonResult("risposta locale", null))).StatusCode);
         await WaitMessageAsync(alice, c, m => m.Author == "Locale" && m.Text == "risposta locale");
         Assert.Equal(HttpStatusCode.NotFound, (await alice.PostAsJsonAsync($"/api/daemon/deliveries/{again.Id}/complete", new DaemonResult("doppione", null))).StatusCode);
+    }
+
+    // La replica che aspettava la risposta è caduta (niente finally): nessun daemon esegue la consegna, e la pulizia la toglie.
+    [Fact]
+    public async Task OrphanedDelivery_IsNeverRun_AndIsCleanedUp()
+    {
+        var poll = new DaemonPollRequest("finto", ["eco"]);
+        Assert.Equal(HttpStatusCode.NoContent, (await alice.PostAsJsonAsync("/api/daemon/poll", poll)).StatusCode); // si registra
+        var dbf = app.Services.GetRequiredService<IDbContextFactory<AgentWeb.Web.AppDb>>();
+        var now = DateTimeOffset.UtcNow;
+        await using (var db = await dbf.CreateDbContextAsync())
+        {
+            db.DaemonDeliveries.Add(new() { Id = "orfana", Owner = "alice@test.it", Runtime = "eco", Prompt = "nessuno legge", CreatedAt = now, WaiterSeenAt = now - TimeSpan.FromMinutes(1) });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.NoContent, (await alice.PostAsJsonAsync("/api/daemon/poll", poll)).StatusCode); // non la prende
+        await Until(async () => { await using var db = await dbf.CreateDbContextAsync(); return !await db.DaemonDeliveries.AnyAsync(d => d.Id == "orfana"); }, "consegna orfana non rimossa");
     }
 
     // Due repliche sullo stesso database: il daemon è collegato alla prima, la menzione arriva alla seconda.

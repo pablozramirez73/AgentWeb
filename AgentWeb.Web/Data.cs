@@ -117,6 +117,7 @@ public sealed class DaemonDeliveryEntity
     public string? Result { get; set; }
     public string? Error { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset WaiterSeenAt { get; set; } // AskAsync lo rinnova a ogni tick: se smette, nessuno aspetta più la risposta
 }
 
 // Un daemon collegato, per sessione: vivo finché fa poll o heartbeat.
