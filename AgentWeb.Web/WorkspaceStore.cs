@@ -338,10 +338,9 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
                         && t.Status == WorkStatus.Todo && !t.AssigneeIsAgent) is { } task
                     && inChannel.Contains(task.Agent!, StringComparer.OrdinalIgnoreCase))
                 {
-                    // Condizionato allo stato letto: se il worker l'ha appena preso, non lo rimettiamo "Da fare" (girerebbe due volte).
-                    var observed = task.Status;
+                    // Condizionato: se un'altra risposta l'ha appena ridato all'agente (o il worker l'ha preso), non lo rimettiamo in coda due volte.
                     var now = DateTimeOffset.UtcNow;
-                    if (await db.Tasks.Where(x => x.Id == task.Id && x.Status == observed).ExecuteUpdateAsync(u => u
+                    if (await db.Tasks.Where(x => x.Id == task.Id && x.Status == WorkStatus.Todo && !x.AssigneeIsAgent).ExecuteUpdateAsync(u => u
                             .SetProperty(x => x.Assignee, task.Agent).SetProperty(x => x.AssigneeIsAgent, true)
                             .SetProperty(x => x.Status, WorkStatus.Todo).SetProperty(x => x.UpdatedAt, now)) > 0)
                     {
@@ -688,7 +687,8 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     public async Task<TaskDto?> StartTaskAsync(int taskId)
     {
         await using var db = await dbf.CreateDbContextAsync();
-        var taken = await db.Tasks.Where(t => t.Id == taskId && t.Status == WorkStatus.Todo)
+        // Solo se è ancora di un agente: un job rimasto in coda non prende un task passato a una persona (PER TE:).
+        var taken = await db.Tasks.Where(t => t.Id == taskId && t.Status == WorkStatus.Todo && t.AssigneeIsAgent)
             .ExecuteUpdateAsync(u => u.SetProperty(t => t.Status, WorkStatus.InProgress).SetProperty(t => t.Result, (string?)null).SetProperty(t => t.UpdatedAt, DateTimeOffset.UtcNow));
         if (taken == 0) return null;
         var dto = ToDto(await db.Tasks.AsNoTracking().SingleAsync(t => t.Id == taskId));

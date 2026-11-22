@@ -5,6 +5,7 @@ using System.Text.Json;
 using AgentWeb.Shared.Agents;
 using AgentWeb.Shared.Workspace;
 using AgentWeb.Web;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentWeb.Tests;
@@ -76,6 +77,10 @@ public sealed class Phase7ParallelTests
         var task = (await (await alice.PostAsJsonAsync($"/api/workspace/channels/{c.Id}/tasks", new NewTaskRequest("uno", "", NewTaskRequest.Me))).Content.ReadFromJsonAsync<TaskDto>())!;
 
         var store = app.Services.GetRequiredService<WorkspaceStore>();
+        Assert.Null(await store.StartTaskAsync(task.Id)); // di una persona: un job rimasto in coda non lo prende
+        // Lo stesso task in mano a un agente (senza metterlo in coda: i job sono quelli qui sotto).
+        await using (var db = await app.Services.GetRequiredService<IDbContextFactory<AppDb>>().CreateDbContextAsync())
+            await db.Tasks.Where(t => t.Id == task.Id).ExecuteUpdateAsync(u => u.SetProperty(t => t.AssigneeIsAgent, true).SetProperty(t => t.Assignee, "Cindy"));
         var winners = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => Task.Run(() => store.StartTaskAsync(task.Id))));
         Assert.Single(winners, w => w is not null);
     }
