@@ -111,7 +111,6 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
     });
 
     // Solo amministratori, e niente URL o chiavi via MCP: il nuovo agente usa l'LLM (server e token) di un agente già configurato.
-    // shortcut: legge e riscrive le impostazioni intere; un salvataggio contemporaneo dalla pagina Agenti può sovrascriverlo.
     [McpServerTool(Name = "create_agent"), Description("Solo amministratori. Crea un agente AgentWeb che usa lo stesso LLM di un agente esistente (eventualmente con un altro modello).")]
     public Task<string> CreateAgent(
         [Description("Nome (lettere, numeri, _ e -): si menziona con @nome")] string name,
@@ -121,7 +120,7 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         [Description("'internal' (default), 'mcp' (chiamabile con ask_agent) oppure 'a2a'")] string protocol = AgentProtocols.Internal,
         [Description("Canale (id o nome) a cui aggiungerlo subito, se l'hai creato tu (facoltativo)")] string? channel = null) => Run(async () =>
     {
-        if (http.HttpContext?.User.IsInRole(AccountEndpoints.AdminRole) != true) throw new McpException("Solo un amministratore può creare agenti.");
+        RequireAdmin("creare agenti");
         var s = settings.Get();
         var source = (like is null ? s.LocalAgents.FirstOrDefault(a => a.Enabled) : s.FindLocal(like.TrimStart('@')))
             ?? throw new McpException(like is null ? "Nessun agente esistente da cui copiare l'LLM: creane uno dalla pagina Agenti." : $"Agente \"{like}\" inesistente o disabilitato.");
@@ -132,12 +131,89 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
             Name = name.Trim().TrimStart('@'), Prompt = purpose.Trim(), Protocol = protocol, Tools = [.. AgentTools.Defaults],
             Llm = new() { Kind = src.Kind, Url = src.Url, ApiKey = src.ApiKey, DefaultModel = string.IsNullOrWhiteSpace(model) ? src.DefaultModel : model.Trim() },
         });
-        if (s.Validate(settings.AllowStdio) is { Count: > 0 } errors) throw new McpException(string.Join(" ", errors));
-        settings.Save(s);
+        SaveSettings(s);
         var created = s.LocalAgents[^1];
         if (channel is not null) await store.AddChannelAgentAsync(await ChannelAsync(channel), User, created.Name);
         return $"Agente {created.Name} creato (LLM di {source.Name}, modello {created.Llm.DefaultModel})" + (channel is null ? "." : $" e aggiunto al canale {channel}.");
     });
+
+    [McpServerTool(Name = "add_member"), Description("Aggiunge una persona (email) a un canale privato che vedi.")]
+    public Task<string> AddMember([Description("Id o nome del canale")] string channel, [Description("Email dell'utente AgentWeb")] string user) => Run(async () =>
+    {
+        await store.AddMemberAsync(await ChannelAsync(channel), User, user.Trim());
+        return $"{user.Trim()} è membro del canale {channel}.";
+    });
+
+    [McpServerTool(Name = "remove_member"), Description("Toglie una persona da un canale privato (solo chi l'ha creato), oppure ti fa uscire se indichi te stesso.")]
+    public Task<string> RemoveMember([Description("Id o nome del canale")] string channel, [Description("Email dell'utente")] string user) => Run(async () =>
+    {
+        await store.RemoveMemberAsync(await ChannelAsync(channel), User, user.Trim());
+        return $"{user.Trim()} non è più membro del canale {channel}.";
+    });
+
+    void RequireAdmin(string what)
+    {
+        if (http.HttpContext?.User.IsInRole(AccountEndpoints.AdminRole) != true) throw new McpException($"Solo un amministratore può {what}.");
+    }
+
+    // Come create_agent: niente server o chiavi dell'LLM via MCP, solo ciò che si sceglie nella scheda dell'agente.
+    [McpServerTool(Name = "update_agent"), Description("Solo amministratori. Modifica un agente AgentWeb: scopo, modello, protocollo, abilitato. I campi omessi restano com'erano.")]
+    public Task<string> UpdateAgent(
+        [Description("Nome dell'agente")] string name,
+        [Description("Nuovo scopo (system prompt)")] string? purpose = null,
+        [Description("Nuovo modello (dello stesso server LLM)")] string? model = null,
+        [Description("'internal', 'mcp' oppure 'a2a'")] string? protocol = null,
+        [Description("true = abilitato, false = disabilitato")] bool? enabled = null) => Run(async () =>
+    {
+        RequireAdmin("modificare gli agenti");
+        var s = settings.Get();
+        var a = s.LocalAgents.FirstOrDefault(x => x.Name.Equals(name.TrimStart('@'), StringComparison.OrdinalIgnoreCase))
+            ?? throw new McpException($"Agente \"{name}\" inesistente.");
+        if (protocol is not null && AgentProtocols.All.All(x => x.Value != protocol)) throw new McpException("protocol deve essere 'internal', 'mcp' o 'a2a'.");
+        if (purpose is not null) a.Prompt = purpose.Trim();
+        if (!string.IsNullOrWhiteSpace(model)) a.Llm.DefaultModel = model.Trim();
+        if (protocol is not null) a.Protocol = protocol;
+        if (enabled is { } e) a.Enabled = e;
+        SaveSettings(s);
+        await Task.CompletedTask;
+        return $"Agente {a.Name}: modello {a.Llm.DefaultModel}, protocollo {a.Protocol}, {(a.Enabled ? "abilitato" : "disabilitato")}.";
+    });
+
+    [McpServerTool(Name = "add_a2a_agent"), Description("Solo amministratori. Collega un agente esterno via A2A (Agent Card in <url>/.well-known/agent-card.json): poi si @menziona e si aggiunge ai canali come gli altri.")]
+    public Task<string> AddA2AAgent(
+        [Description("Nome con cui menzionarlo (lettere, numeri, _ e -)")] string name,
+        [Description("URL base dell'agente A2A, raggiungibile dal server")] string url,
+        [Description("Bearer token, se l'agente lo chiede (facoltativo)")] string? token = null) => Run(async () =>
+    {
+        RequireAdmin("collegare agenti A2A");
+        var peer = new A2AAgentConfig { Name = name.Trim().TrimStart('@'), Url = url.Trim(), BearerToken = token?.Trim() ?? "" };
+        string card;
+        try { card = await settings.TestA2AAsync(peer).WaitAsync(TimeSpan.FromSeconds(30)); } // prima di salvare: un URL sbagliato si vede subito
+        catch (Exception e) { throw new McpException($"Agent Card non raggiungibile su {peer.Url}: {e.GetBaseException().Message}"); }
+        var s = settings.Get();
+        s.A2AAgents.Add(peer);
+        SaveSettings(s);
+        return $"Agente A2A {peer.Name} collegato: {card}";
+    });
+
+    [McpServerTool(Name = "remove_a2a_agent"), Description("Solo amministratori. Scollega un agente A2A esterno.")]
+    public Task<string> RemoveA2AAgent([Description("Nome dell'agente A2A")] string name) => Run(async () =>
+    {
+        RequireAdmin("scollegare agenti A2A");
+        var s = settings.Get();
+        if (s.A2AAgents.RemoveAll(a => a.Name.Equals(name.TrimStart('@'), StringComparison.OrdinalIgnoreCase)) == 0)
+            throw new McpException($"Nessun agente A2A si chiama \"{name}\".");
+        SaveSettings(s);
+        await Task.CompletedTask;
+        return $"Agente A2A {name.TrimStart('@')} scollegato.";
+    });
+
+    // shortcut: legge e riscrive le impostazioni intere; un salvataggio contemporaneo dalla pagina Agenti può sovrascriverlo.
+    void SaveSettings(AgentSettings s)
+    {
+        if (s.Validate(settings.AllowStdio) is { Count: > 0 } errors) throw new McpException(string.Join(" ", errors));
+        settings.Save(s);
+    }
 
     // Documenti: la memoria del canale che gli agenti consultano (stessi permessi della pagina Memoria del canale).
     [McpServerTool(Name = "list_documents", ReadOnly = true), Description("Elenca i documenti caricati nella memoria di un canale (id, titolo, autore, parti).")]

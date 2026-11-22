@@ -273,6 +273,22 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await PostAsync(channelId, "Sistema", AuthorKind.System, $"{user} ha aggiunto {newMember} al canale.");
     }
 
+    // Chi ha creato il canale toglie gli altri; ognuno può uscire da solo. Il creatore resta (altrimenti nessuno sceglie più gli agenti).
+    public async Task RemoveMemberAsync(int channelId, string user, string member)
+    {
+        member = Required(member, 256, "Utente");
+        await using var db = await dbf.CreateDbContextAsync();
+        await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
+        var channel = await db.Channels.SingleAsync(c => c.Id == channelId);
+        if (channel.DirectKey is not null) throw new ArgumentException("Da un messaggio diretto non si esce.");
+        if (member == channel.CreatedBy) throw new ArgumentException("Chi ha creato il canale non può essere tolto.");
+        if (member != user && user != channel.CreatedBy) throw new UnauthorizedAccessException("Solo chi ha creato il canale può togliere gli altri membri.");
+        if (await db.ChannelMembers.Where(m => m.ChannelId == channelId && m.UserName == member).ExecuteDeleteAsync() == 0)
+            throw new ArgumentException($"{member} non è membro del canale.");
+        bus.Publish(new("members", channelId));
+        await PostAsync(channelId, "Sistema", AuthorKind.System, member == user ? $"{user} è uscito dal canale." : $"{user} ha tolto {member} dal canale.");
+    }
+
     public async Task<List<MessageDto>> GetMessagesAsync(int channelId, string user, int take = 200)
     {
         await using var db = await dbf.CreateDbContextAsync();

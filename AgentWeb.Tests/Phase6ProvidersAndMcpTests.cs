@@ -347,6 +347,43 @@ public sealed class Phase6AgentsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Mcp_Members_AddAndRemove_WithChannelRules()
+    {
+        await using var alice = await McpAsync(await TokenAsync("alice@test.it"));
+        await using var bob = await McpAsync(await TokenAsync("bob@test.it"));
+        Assert.NotEqual(true, (await alice.CallToolAsync("create_channel", new Dictionary<string, object?> { ["name"] = "riservato", ["private"] = true })).IsError);
+        Assert.True((await bob.CallToolAsync("read_messages", new Dictionary<string, object?> { ["channel"] = "riservato" })).IsError);
+
+        Assert.NotEqual(true, (await alice.CallToolAsync("add_member", new Dictionary<string, object?> { ["channel"] = "riservato", ["user"] = "bob@test.it" })).IsError);
+        Assert.NotEqual(true, (await bob.CallToolAsync("read_messages", new Dictionary<string, object?> { ["channel"] = "riservato" })).IsError);
+        Assert.True((await bob.CallToolAsync("remove_member", new Dictionary<string, object?> { ["channel"] = "riservato", ["user"] = "alice@test.it" })).IsError); // il creatore resta
+
+        Assert.NotEqual(true, (await alice.CallToolAsync("remove_member", new Dictionary<string, object?> { ["channel"] = "riservato", ["user"] = "bob@test.it" })).IsError);
+        Assert.True((await bob.CallToolAsync("read_messages", new Dictionary<string, object?> { ["channel"] = "riservato" })).IsError);
+    }
+
+    [Fact]
+    public async Task Mcp_UpdateAgent_AndA2APeers_AreAdminOnly()
+    {
+        await app.CreateUserAsync("root@test.it", admin: true);
+        await using var root = await McpAsync(await TokenAsync("root@test.it"));
+        await using var bob = await McpAsync(await TokenAsync("bob@test.it"));
+        var store = app.Services.GetRequiredService<AgentSettingsStore>();
+
+        Assert.True((await bob.CallToolAsync("update_agent", new Dictionary<string, object?> { ["name"] = "Capo", ["enabled"] = false })).IsError);
+        var updated = await root.CallToolAsync("update_agent", new Dictionary<string, object?> { ["name"] = "Capo", ["model"] = "nuovo", ["protocol"] = "mcp", ["purpose"] = "Coordini meglio." });
+        Assert.NotEqual(true, updated.IsError);
+        var capo = store.Get().LocalAgents.Single(a => a.Name == "Capo");
+        Assert.Equal(("nuovo", AgentProtocols.Mcp, "Coordini meglio.", "k"), (capo.Llm.DefaultModel, capo.Protocol, capo.Prompt, capo.Llm.ApiKey));
+
+        Assert.True((await bob.CallToolAsync("add_a2a_agent", new Dictionary<string, object?> { ["name"] = "hermes", ["url"] = "http://127.0.0.1:1" })).IsError);
+        var bad = await root.CallToolAsync("add_a2a_agent", new Dictionary<string, object?> { ["name"] = "hermes", ["url"] = "http://127.0.0.1:1" });
+        Assert.True(bad.IsError); // Agent Card irraggiungibile: non si salva
+        Assert.Empty(store.Get().A2AAgents);
+        Assert.True((await root.CallToolAsync("remove_a2a_agent", new Dictionary<string, object?> { ["name"] = "hermes" })).IsError);
+    }
+
+    [Fact]
     public async Task RevokedToken_StopsWorkingImmediately()
     {
         var token = await TokenAsync("alice@test.it");
