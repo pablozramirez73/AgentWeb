@@ -10,7 +10,7 @@ public sealed record AgentCall(int ChannelId, int Depth, string? Focus = null);
 
 // Esegue un agente (LLM del suo provider + tool MCP + strumenti per collaborare, oppure remoto via A2A).
 // Collaborazione: un agente chiama ask_agent per consultare un altro agente; domanda e risposta compaiono nel canale.
-public sealed class AgentRuntime(LlmClients llms, AgentSettingsStore store, WorkspaceStore ws, WorkspaceBus bus, NativeTools native, MemoryStore memory, ILogger<AgentRuntime> log)
+public sealed class AgentRuntime(LlmClients llms, AgentSettingsStore store, WorkspaceStore ws, WorkspaceBus bus, NativeTools native, MemoryStore memory, AgentActivity activity, ILogger<AgentRuntime> log)
 {
     public const int MaxDelegationDepth = 2; // A chiede a B, B può chiedere a C; C non delega oltre (niente catene infinite)
 
@@ -116,7 +116,10 @@ public sealed class AgentRuntime(LlmClients llms, AgentSettingsStore store, Work
                 {await ws.TranscriptAsync(call.ChannelId)}
                 Rispondi solo con il tuo contributo, senza ripetere la richiesta.
                 """;
-            var answer = await AskAsync(name, prompt, ct, call with { Depth = call.Depth + 1 });
+            // Un lavoro a sé: i token e il modello di chi risponde non finiscono nel lavoro di chi ha chiesto.
+            var answer = "";
+            await activity.TrackAsync(new AgentJob(call.ChannelId, name, null, call.Depth + 1),
+                async () => answer = await AskAsync(name, prompt, ct, call with { Depth = call.Depth + 1 }), "delega");
             if (answer.Length == 0) answer = "(nessuna risposta)";
             await ws.PostAsync(call.ChannelId, name, AuthorKind.Agent, answer, WorkspaceStore.NoMentions);
             return answer;

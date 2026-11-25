@@ -50,9 +50,10 @@ public sealed class AgentActivity
     }
     public static readonly AsyncLocal<Usage?> Current = new();
 
-    public async Task TrackAsync(AgentJob job, Func<Task> work)
+    // kind: "risposta" o "task" dal job; "delega" quando un agente lavora per un altro (ask_agent), con token e modello suoi.
+    public async Task TrackAsync(AgentJob job, Func<Task> work, string? kind = null)
     {
-        var kind = job.TaskId is null ? "risposta" : "task";
+        kind ??= job.TaskId is null ? "risposta" : "task";
         var run = new Run(Guid.NewGuid(), job.Agent, job.ChannelId, kind, DateTimeOffset.UtcNow);
         using var span = Source.StartActivity($"agent {kind}");
         span?.SetTag("agentweb.agent", job.Agent);
