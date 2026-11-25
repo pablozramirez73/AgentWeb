@@ -124,9 +124,10 @@ public sealed class Mailer(IConfiguration config)
 // Accesso con Google / GitHub (OAuth 2.0 con PKCE). Si attiva solo il provider configurato:
 //   Auth:Google:ClientId / ClientSecret   (redirect URI da registrare: https://<dominio>/signin-google)
 //   Auth:GitHub:ClientId / ClientSecret   (callback URL: https://<dominio>/signin-github)
+//   Auth:Apple:ClientId (Services ID) / TeamId / KeyId / PrivateKey (contenuto del .p8)   (return URL: https://<dominio>/signin-apple)
 public static class ExternalProviders
 {
-    public static readonly string[] Names = ["Google", "GitHub"];
+    public static readonly string[] Names = ["Google", "GitHub", "Apple"];
 
     public static void AddExternalProviders(this WebApplicationBuilder builder)
     {
@@ -135,6 +136,50 @@ public static class ExternalProviders
             "https://openidconnect.googleapis.com/v1/userinfo", ["openid", "email", "profile"], id: "sub", nameKey: "name");
         Add(auth, builder.Configuration, "GitHub", "https://github.com/login/oauth/authorize", "https://github.com/login/oauth/access_token",
             "https://api.github.com/user", ["read:user", "user:email"], id: "id", nameKey: "login");
+        AddApple(auth, builder.Configuration);
+    }
+
+    // Apple: OpenID Connect con risposta in POST (form_post) e niente userinfo; l'identità (sub, email) è nell'id_token.
+    static void AddApple(AuthenticationBuilder auth, IConfiguration config)
+    {
+        if (config["Auth:Apple:ClientId"] is not { Length: > 0 } clientId) return;
+        string teamId = config["Auth:Apple:TeamId"] ?? "", keyId = config["Auth:Apple:KeyId"] ?? "", key = config["Auth:Apple:PrivateKey"] ?? "";
+        if (teamId.Length == 0 || keyId.Length == 0 || key.Length == 0)
+            throw new InvalidOperationException("Accesso con Apple: servono Auth:Apple:TeamId, KeyId e PrivateKey oltre a ClientId.");
+        auth.AddOpenIdConnect("Apple", "Apple", o =>
+        {
+            o.SignInScheme = IdentityConstants.ExternalScheme;
+            o.Authority = "https://appleid.apple.com";
+            o.ClientId = clientId;
+            o.CallbackPath = "/signin-apple";
+            o.ResponseType = "code";
+            o.ResponseMode = "form_post"; // obbligatorio per Apple quando si chiede l'email
+            o.UsePkce = false; // shortcut: Apple non documenta il code_verifier; bastano client secret, state e nonce
+            o.GetClaimsFromUserInfoEndpoint = false;
+            o.Scope.Clear();
+            o.Scope.Add("openid");
+            o.Scope.Add("email");
+            o.Events.OnAuthorizationCodeReceived = ctx =>
+            {
+                ctx.TokenEndpointRequest!.ClientSecret = AppleClientSecret(clientId, teamId, keyId, key, DateTime.UtcNow);
+                return Task.CompletedTask;
+            };
+        });
+    }
+
+    // Il client secret di Apple è un JWT ES256 firmato con la chiave .p8; lo rigeneriamo a ogni login (scade dopo 5 minuti).
+    public static string AppleClientSecret(string clientId, string teamId, string keyId, string pem, DateTime now)
+    {
+        using var ec = System.Security.Cryptography.ECDsa.Create();
+        ec.ImportFromPem(pem.Replace("\\n", "\n")); // nelle variabili d'ambiente gli a capo arrivano spesso come \n
+        var signing = new Microsoft.IdentityModel.Tokens.SigningCredentials(
+            new Microsoft.IdentityModel.Tokens.ECDsaSecurityKey(ec) { KeyId = keyId }, Microsoft.IdentityModel.Tokens.SecurityAlgorithms.EcdsaSha256)
+            { CryptoProviderFactory = new() { CacheSignatureProviders = false } }; // la chiave viene liberata a fine metodo
+        return new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().CreateToken(new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
+        {
+            Issuer = teamId, Audience = "https://appleid.apple.com", IssuedAt = now, NotBefore = now, Expires = now.AddMinutes(5),
+            Claims = new Dictionary<string, object> { ["sub"] = clientId }, SigningCredentials = signing,
+        });
     }
 
     static void Add(AuthenticationBuilder auth, IConfiguration config, string name, string authorize, string token, string userInfo, string[] scopes, string id, string nameKey)

@@ -91,4 +91,28 @@ public sealed class ProfileTests
         using var http = await app.LoginAsync(Alice);
         Assert.Equal(["GitHub"], (await http.GetFromJsonAsync<ProfileDto>("/api/account/profile"))!.Providers);
     }
+
+    [Fact]
+    public async Task Apple_ShowsOnLogin_AndSignsClientSecretWithP8Key()
+    {
+        using var ec = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        var pem = ec.ExportPkcs8PrivateKeyPem().Replace("\n", "\\n"); // come arriva da una variabile d'ambiente
+        using (var app = new TestApp(new() { ["Auth:Apple:ClientId"] = "work.example.web", ["Auth:Apple:TeamId"] = "TEAM123", ["Auth:Apple:KeyId"] = "KEY456", ["Auth:Apple:PrivateKey"] = pem }))
+        using (var anon = app.CreateClient())
+            Assert.Contains("Continua con Apple", await anon.GetStringAsync("/login"));
+
+        var now = DateTime.UtcNow;
+        var jwt = ExternalProviders.AppleClientSecret("work.example.web", "TEAM123", "KEY456", pem, now);
+        var key = new Microsoft.IdentityModel.Tokens.ECDsaSecurityKey(ec);
+        var r = await new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().ValidateTokenAsync(jwt, new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        {
+            ValidIssuer = "TEAM123", ValidAudience = "https://appleid.apple.com", IssuerSigningKey = key,
+        });
+        Assert.True(r.IsValid, r.Exception?.Message);
+        var token = (Microsoft.IdentityModel.JsonWebTokens.JsonWebToken)r.SecurityToken;
+        Assert.Equal("ES256", token.Alg);
+        Assert.Equal("KEY456", token.Kid);
+        Assert.Equal("work.example.web", token.Subject);
+        Assert.True(token.ValidTo <= now.AddMinutes(6)); // Apple rifiuta secret più lunghi di 6 mesi: qui durano minuti
+    }
 }
