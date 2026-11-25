@@ -1,0 +1,167 @@
+@page "/stats"
+@rendermode InteractiveWebAssembly
+@inject IWorkspaceClient Ws
+
+<PageTitle>Statistiche · AgentWeb</PageTitle>
+
+@* Token, lavori degli agenti, errori e messaggi degli ultimi giorni, solo dei canali che vedi. *@
+<div class="stats-page">
+    <header class="stats-head">
+        <h2>Statistiche</h2>
+        <div class="seg" role="group" aria-label="Periodo">
+            @foreach (var d in Periods)
+            {
+                <button class="@(days == d ? "on" : "")" @onclick="() => LoadAsync(d)">@d giorni</button>
+            }
+        </div>
+    </header>
+
+    @if (error is not null) { <div class="alert alert-danger py-2" role="alert">@error</div> }
+    @if (stats is null) { <p class="text-muted">Caricamento…</p> }
+    else
+    {
+        var input = stats.Daily.Sum(d => d.InputTokens);
+        var output = stats.Daily.Sum(d => d.OutputTokens);
+        var runs = stats.Daily.Sum(d => d.Runs);
+        var errors = stats.Daily.Sum(d => d.Errors);
+
+        <section class="tiles">
+            <div class="tile"><span class="tile-label">Token totali</span><strong>@Num(input + output)</strong><span class="tile-sub">@Num(input) in · @Num(output) out</span></div>
+            <div class="tile"><span class="tile-label">Lavori degli agenti</span><strong>@Num(runs)</strong><span class="tile-sub">@(runs == 0 ? "—" : $"≈ {Num((input + output) / runs)} token per lavoro")</span></div>
+            <div class="tile"><span class="tile-label">Errori</span><strong>@Num(errors)</strong><span class="tile-sub">@(runs == 0 ? "—" : $"{100.0 * errors / runs:0.#}% dei lavori")</span></div>
+            <div class="tile"><span class="tile-label">Messaggi</span><strong>@Num(stats.Daily.Sum(d => d.Messages))</strong><span class="tile-sub">persone e agenti</span></div>
+        </section>
+
+        @if (selected is { } s)
+        {
+            <p class="day-detail" aria-live="polite">
+                <strong>@Date(s.Day)</strong> · @Num(s.InputTokens) token in · @Num(s.OutputTokens) out · @s.Runs lavori · @s.Errors errori · @s.Messages messaggi
+                <button class="btn btn-link btn-sm" @onclick="() => selected = null">Chiudi</button>
+            </p>
+        }
+
+        @Chart("Token per giorno", stats.Daily, d => [(d.InputTokens, "s1"), (d.OutputTokens, "s2")], [("Input", "s1"), ("Output", "s2")])
+        @Chart("Lavori ed errori per giorno", stats.Daily, d => [(d.Runs - d.Errors, "s1"), (d.Errors, "bad")], [("Riusciti", "s1"), ("Con errore", "bad")])
+        @Chart("Messaggi per giorno", stats.Daily, d => [(d.Messages, "s1")], [])
+
+        <h3 class="section-label">Per agente</h3>
+        <div class="card-block p-0 table-wrap">
+            @if (stats.Agents.Count == 0) { <p class="text-muted m-0 p-3">Nessun lavoro degli agenti nel periodo.</p> }
+            else
+            {
+                var maxTokens = Math.Max(1, stats.Agents.Max(a => a.InputTokens + a.OutputTokens));
+                <table class="table stats-table m-0">
+                    <thead><tr><th>Agente</th><th class="num">Lavori</th><th class="num">Errori</th><th class="num">Token in</th><th class="num">Token out</th><th class="num">Durata media</th><th class="num">Max</th><th aria-label="Quota di token"></th></tr></thead>
+                    <tbody>
+                        @foreach (var a in stats.Agents)
+                        {
+                            <tr>
+                                <td>@a.Agent</td><td class="num">@a.Runs</td><td class="num @(a.Errors > 0 ? "text-danger" : "")">@a.Errors</td>
+                                <td class="num">@Num(a.InputTokens)</td><td class="num">@Num(a.OutputTokens)</td>
+                                <td class="num">@Secs(a.AvgSeconds)</td><td class="num">@Secs(a.MaxSeconds)</td>
+                                <td class="share"><span style="width: @Pct(a.InputTokens + a.OutputTokens, maxTokens)"></span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <h3 class="section-label">Per modello</h3>
+        <div class="card-block p-0 table-wrap">
+            @if (stats.Models.Count == 0) { <p class="text-muted m-0 p-3">Nessun modello ha riportato token nel periodo (i daemon non li riportano).</p> }
+            else
+            {
+                <table class="table stats-table m-0">
+                    <thead><tr><th>Modello</th><th class="num">Lavori</th><th class="num">Token in</th><th class="num">Token out</th><th class="num">Totale</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in stats.Models)
+                        {
+                            <tr><td class="mono">@m.Model</td><td class="num">@m.Runs</td><td class="num">@Num(m.InputTokens)</td><td class="num">@Num(m.OutputTokens)</td><td class="num">@Num(m.InputTokens + m.OutputTokens)</td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <h3 class="section-label">Task per stato</h3>
+        <div class="card-block">
+            @{ var maxTask = Math.Max(1, stats.Tasks.Select(t => t.Count).DefaultIfEmpty().Max()); }
+            @if (stats.Tasks.Count == 0) { <p class="text-muted m-0">Nessun task.</p> }
+            @foreach (var t in stats.Tasks)
+            {
+                <div class="hbar"><span class="hbar-label">@Status(t.Status)</span><span class="hbar-track"><span class="@(t.Status == WorkStatus.Failed ? "bad" : "s1")" style="width: @Pct(t.Count, maxTask)"></span></span><span class="hbar-value">@t.Count</span></div>
+            }
+        </div>
+
+        <h3 class="section-label">Ultimi errori</h3>
+        <div class="card-block p-0">
+            @if (stats.Errors.Count == 0) { <p class="text-muted m-0 p-3">Nessun errore nel periodo. ✓</p> }
+            @foreach (var e in stats.Errors)
+            {
+                <div class="err-row">
+                    <div class="err-meta"><span class="err-icon" aria-hidden="true">⚠</span> <strong>@e.Agent</strong> · #@e.Channel · @e.Kind · @e.StartedAt.ToLocalTime().ToString("dd/MM HH:mm") · @Secs(e.Seconds ?? 0)</div>
+                    <div class="err-text">@e.Error</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    static readonly int[] Periods = [7, 30, 90];
+    int days = 30;
+    StatsDto? stats;
+    DayStatDto? selected;
+    string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync(days);
+
+    async Task LoadAsync(int d)
+    {
+        days = d; error = null; selected = null;
+        try { stats = await Ws.GetStatsAsync(d); }
+        catch (Exception ex) { error = ex.GetBaseException().Message; }
+    }
+
+    // Barre impilate per giorno; toccare una colonna mostra i valori del giorno (su iPhone non c'è il passaggio del mouse).
+    RenderFragment Chart(string title, List<DayStatDto> data, Func<DayStatDto, (long Value, string Css)[]> parts, (string Label, string Css)[] legend) => __builder =>
+    {
+        var max = Math.Max(1, data.Max(d => parts(d).Sum(p => p.Value)));
+        <section class="card-block chart">
+            <div class="chart-head">
+                <h3 class="chart-title">@title</h3>
+                @if (legend.Length > 1)
+                {
+                    <ul class="legend">@foreach (var (label, css) in legend) { <li><span class="swatch @css"></span>@label</li> }</ul>
+                }
+                <span class="chart-max">max @Num(max)</span>
+            </div>
+            <div class="bars" style="--n: @data.Count">
+                @foreach (var d in data)
+                {
+                    var p = parts(d);
+                    <button class="col @(selected == d ? "sel" : "")" title="@($"{Date(d.Day)}: {string.Join(" · ", p.Zip(legend.Length > 0 ? legend.Select(l => l.Label) : ["Totale"]).Select(x => $"{x.Second} {Num(x.First.Value)}"))}")"
+                            aria-label="@Date(d.Day)" @onclick="() => selected = selected == d ? null : d">
+                        @foreach (var (value, css) in p.Where(x => x.Value > 0))
+                        {
+                            <span class="seg-bar @css" style="height: @Pct(value, max)"></span>
+                        }
+                    </button>
+                }
+            </div>
+            <div class="axis"><span>@Date(data[0].Day)</span><span>@Date(data[^1].Day)</span></div>
+        </section>
+    };
+
+    static string Pct(long v, long max) => (100.0 * v / max).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
+    static string Num(long n) => n >= 1_000_000 ? $"{n / 1_000_000.0:0.#} M" : n >= 10_000 ? $"{n / 1000.0:0.#} k" : n.ToString("N0");
+    static string Secs(double s) => s >= 60 ? $"{s / 60:0.#} min" : $"{s:0.#} s";
+    static readonly string[] Months = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
+    static string Date(DateOnly d) => $"{d.Day} {Months[d.Month - 1]}";
+    static string Status(WorkStatus s) => s switch
+    {
+        WorkStatus.Todo => "Da fare", WorkStatus.InProgress => "In corso", WorkStatus.Done => "Fatti", WorkStatus.Failed => "Falliti",
+        WorkStatus.Backlog => "Backlog", WorkStatus.Closed => "Chiusi", _ => s.ToString(),
+    };
+}

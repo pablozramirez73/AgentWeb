@@ -53,7 +53,7 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
         var key = string.Join('\u0001', p.Kind, p.Url.Trim(), p.ApiKey, m);
         if (p.Kind == LlmKinds.Daemon) return cache.GetOrAdd(key, _ => new DaemonChatClient(daemons, p.Url.Trim(), m)); // niente tool né limite: decide il daemon
         var gate = perServer.GetOrAdd(p.Kind + "|" + p.Url.Trim().TrimEnd('/'), _ => new SemaphoreSlim(maxPerServer, maxPerServer));
-        return cache.GetOrAdd(key, _ => new ThrottledChatClient(Create(p, m), gate)
+        return cache.GetOrAdd(key, _ => new UsageChatClient(new ThrottledChatClient(Create(p, m), gate), m)
             .AsBuilder()
             .UseOpenTelemetry(sourceName: AgentActivity.Name) // span gen_ai e token usati per modello (visibili solo con OpenTelemetry attivo)
             .UseFunctionInvocation(configure: f => f.AllowConcurrentInvocation = true).Build());
@@ -146,5 +146,26 @@ sealed class ThrottledChatClient(IChatClient inner, SemaphoreSlim gate) : Delega
             await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken)) yield return update;
         }
         finally { gate.Release(); }
+    }
+}
+
+// Somma i token di ogni chiamata al modello nel lavoro in corso (AgentActivity.Current), per le Statistiche.
+sealed class UsageChatClient(IChatClient inner, string model) : DelegatingChatClient(inner)
+{
+    public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var r = await base.GetResponseAsync(messages, options, cancellationToken);
+        AgentActivity.Current.Value?.Add(r.Usage, r.ModelId ?? model);
+        return r;
+    }
+
+    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var u in base.GetStreamingResponseAsync(messages, options, cancellationToken))
+        {
+            foreach (var c in u.Contents) if (c is UsageContent usage) AgentActivity.Current.Value?.Add(usage.Details, u.ModelId ?? model);
+            yield return u;
+        }
     }
 }

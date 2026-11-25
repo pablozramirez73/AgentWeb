@@ -1,12 +1,15 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 
 namespace AgentWeb.Web;
 
 // Cosa stanno facendo gli agenti: lavori in corso e ultimi completati (pagina Attività), più la telemetria
 // OpenTelemetry dello stesso punto: uno span per lavoro, contatore ed istogramma della durata, numero in corso.
-// shortcut: in memoria e per replica (con più repliche ognuna mostra i suoi lavori); per lo storico c'è Grafana/Prometheus.
+// shortcut: "in corso" e "recenti" sono in memoria e per replica (con più repliche ognuna mostra i suoi); lo storico per le
+// Statistiche (durata, esito, token) va invece nel DB, tabella AgentRuns.
 public sealed class AgentActivity
 {
     public const string Name = "AgentWeb";
@@ -21,7 +24,31 @@ public sealed class AgentActivity
     readonly ConcurrentDictionary<Guid, Run> running = new();
     readonly ConcurrentQueue<Run> recent = new();
 
-    public AgentActivity() => Meter.CreateObservableGauge("agentweb.agent.running", () => running.Count, description: "Lavori degli agenti in corso");
+    readonly IDbContextFactory<AppDb> dbf;
+    readonly ILogger<AgentActivity> log;
+
+    public AgentActivity(IDbContextFactory<AppDb> dbf, ILogger<AgentActivity> log)
+    {
+        this.dbf = dbf; this.log = log;
+        Meter.CreateObservableGauge("agentweb.agent.running", () => running.Count, description: "Lavori degli agenti in corso");
+    }
+
+    // Token del lavoro in corso: UsageChatClient ci somma ogni risposta del modello fatta dentro TrackAsync (anche dagli strumenti).
+    public sealed class Usage
+    {
+        long input, output;
+        public long Input => Interlocked.Read(ref input);
+        public long Output => Interlocked.Read(ref output);
+        public string? Model { get; set; }
+        public void Add(UsageDetails? d, string model)
+        {
+            if (d is null) return;
+            Interlocked.Add(ref input, d.InputTokenCount ?? 0);
+            Interlocked.Add(ref output, d.OutputTokenCount ?? 0);
+            Model = model;
+        }
+    }
+    public static readonly AsyncLocal<Usage?> Current = new();
 
     public async Task TrackAsync(AgentJob job, Func<Task> work)
     {
@@ -32,6 +59,7 @@ public sealed class AgentActivity
         span?.SetTag("agentweb.channel", job.ChannelId);
         if (job.TaskId is { } t) span?.SetTag("agentweb.task", t);
         running[run.Id] = run;
+        var usage = Current.Value = new Usage();
         var watch = Stopwatch.StartNew();
         string? error = null;
         try { await work(); }
@@ -45,12 +73,29 @@ public sealed class AgentActivity
         {
             running.TryRemove(run.Id, out _);
             var seconds = watch.Elapsed.TotalSeconds;
+            await SaveAsync(run, seconds, error, usage);
             recent.Enqueue(run with { Seconds = seconds, Error = error });
             while (recent.Count > Keep) recent.TryDequeue(out _);
             KeyValuePair<string, object?>[] tags = [new("agent", job.Agent), new("kind", kind), new("outcome", error is null ? "ok" : "error")];
             Runs.Add(1, tags);
             Duration.Record(seconds, tags);
         }
+    }
+
+    // Lo storico non deve mai far fallire il lavoro: un errore di salvataggio finisce nel log.
+    async Task SaveAsync(Run run, double seconds, string? error, Usage usage)
+    {
+        try
+        {
+            await using var db = await dbf.CreateDbContextAsync();
+            db.AgentRuns.Add(new AgentRunEntity
+            {
+                Agent = run.Agent, ChannelId = run.ChannelId, Kind = run.Kind, StartedAt = run.StartedAt, Seconds = seconds,
+                Error = error is { Length: > 2000 } ? error[..2000] : error, Model = usage.Model, InputTokens = usage.Input, OutputTokens = usage.Output,
+            });
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex) { log.LogWarning(ex, "Storico del lavoro di {Agent} non salvato", run.Agent); }
     }
 
     public (List<Run> Running, List<Run> Recent) Snapshot() =>

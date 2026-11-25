@@ -84,6 +84,7 @@ public static class AgentApi
         });
         ws.MapGet("/feed", (WorkspaceStore s, ClaimsPrincipal u) => s.GetFeedAsync(User(u)));
         ws.MapGet("/activity", (WorkspaceStore s, AgentActivity a, ClaimsPrincipal u) => s.GetActivityAsync(User(u), a));
+        ws.MapGet("/stats", (int? days, WorkspaceStore s, ClaimsPrincipal u) => s.GetStatsAsync(User(u), days ?? 30));
         ws.MapGet("/tasks", (WorkspaceStore s, ClaimsPrincipal u) => s.GetAllTasksAsync(User(u)));
         ws.MapPost("/direct", (NameBody b, WorkspaceStore s, ClaimsPrincipal u) => s.OpenDirectAsync(User(u), b.Name));
         ws.MapGet("/people", (WorkspaceStore s, ClaimsPrincipal u) => s.GetPeopleAsync(User(u)));

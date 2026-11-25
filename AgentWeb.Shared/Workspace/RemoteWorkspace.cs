@@ -325,6 +325,7 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
     public Task MarkReadAsync(int channelId, long lastId) => PostAsync<object?>($"api/workspace/channels/{channelId}/read", new MarkReadRequest(lastId));
     public async Task<string> WhoAmIAsync() => (await GetAsync<AccountInfo>("api/account/me")).UserName;
     public Task<ActivityDto> GetActivityAsync() => GetAsync<ActivityDto>("api/workspace/activity");
+    public Task<StatsDto> GetStatsAsync(int days) => GetAsync<StatsDto>($"api/workspace/stats?days={days}");
     public Task<List<FeedItemDto>> GetFeedAsync() => GetAsync<List<FeedItemDto>>("api/workspace/feed");
     public Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId) => GetAsync<List<MessageDto>>($"api/workspace/channels/{channelId}/messages/{rootId}/thread");
     public Task MarkThreadReadAsync(int channelId, long rootId, long lastId) =>

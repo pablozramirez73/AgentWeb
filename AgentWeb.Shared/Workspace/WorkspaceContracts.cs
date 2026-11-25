@@ -24,6 +24,13 @@ public enum WorkStatus { Todo, InProgress, Done, Failed, Backlog, Closed }
 
 // Pagina Attività: lavori degli agenti in corso e ultimi terminati (Seconds/Error), task aperti.
 public sealed record AgentRunDto(string Agent, int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double? Seconds, string? Error);
+// Pagina Statistiche: ultimi Days giorni (UTC), solo canali visibili. Errors: gli ultimi lavori falliti.
+public sealed record StatsDto(int Days, List<DayStatDto> Daily, List<AgentStatDto> Agents, List<ModelStatDto> Models,
+    List<AgentRunDto> Errors, List<StatusCountDto> Tasks);
+public sealed record DayStatDto(DateOnly Day, int Runs, int Errors, long InputTokens, long OutputTokens, int Messages);
+public sealed record AgentStatDto(string Agent, int Runs, int Errors, long InputTokens, long OutputTokens, double AvgSeconds, double MaxSeconds);
+public sealed record ModelStatDto(string Model, int Runs, long InputTokens, long OutputTokens);
+public sealed record StatusCountDto(WorkStatus Status, int Count);
 public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Recent, List<TaskDto> OpenTasks);
 
 // Pagina Attività (inbox): una voce per canale (Root = null) o per thread che ti riguarda (scritto, risposto o menzionato).
@@ -92,6 +99,7 @@ public interface IWorkspaceClient
     Task<List<SearchHitDto>> SearchAsync(string query);
     Task<string> WhoAmIAsync(); // utente corrente (per riconoscere le proprie @menzioni)
     Task<ActivityDto> GetActivityAsync(); // cosa stanno facendo gli agenti, solo nei canali visibili
+    Task<StatsDto> GetStatsAsync(int days); // token, errori e lavori degli ultimi giorni, solo nei canali visibili
     Task<List<FeedItemDto>> GetFeedAsync(); // inbox della pagina Attività, più recenti per primi
     Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId);
     Task MarkThreadReadAsync(int channelId, long rootId, long lastId); // segna letto il thread senza toccare il resto del canale

@@ -158,6 +158,21 @@ public sealed class TaskEntity
     public string? Agent { get; set; }   // agente che ci lavora (resta anche se passa il task a una persona)
 }
 
+// Storico dei lavori degli agenti (pagina Statistiche): durata, esito e token usati. Token a 0 quando il provider non li riporta (es. daemon).
+public sealed class AgentRunEntity
+{
+    public long Id { get; set; }
+    public string Agent { get; set; } = "";
+    public int ChannelId { get; set; }
+    public string Kind { get; set; } = "";
+    public string? Model { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public double Seconds { get; set; }
+    public string? Error { get; set; }
+    public long InputTokens { get; set; }
+    public long OutputTokens { get; set; }
+}
+
 public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<AppUser>(options)
 {
     public DbSet<ChannelEntity> Channels => Set<ChannelEntity>();
@@ -172,6 +187,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
     public DbSet<DaemonDeliveryEntity> DaemonDeliveries => Set<DaemonDeliveryEntity>();
     public DbSet<DaemonMachineEntity> DaemonMachines => Set<DaemonMachineEntity>();
     public DbSet<PushDeviceEntity> PushDevices => Set<PushDeviceEntity>();
+    public DbSet<AgentRunEntity> AgentRuns => Set<AgentRunEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -181,6 +197,11 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         b.Entity<AppUser>().Property(u => u.NotifyMentions).HasDefaultValue(true);
         b.Entity<AppUser>().Property(u => u.NotifyPrivate).HasDefaultValue(true);
         b.Entity<AppUser>().Property(u => u.NotifyTasks).HasDefaultValue(true);
+        b.Entity<AgentRunEntity>().HasIndex(r => r.StartedAt);
+        b.Entity<AgentRunEntity>().Property(r => r.Agent).HasMaxLength(100);
+        b.Entity<AgentRunEntity>().Property(r => r.Kind).HasMaxLength(20);
+        b.Entity<AgentRunEntity>().Property(r => r.Model).HasMaxLength(200);
+        b.Entity<AgentRunEntity>().Property(r => r.Error).HasMaxLength(2000);
         b.Entity<PushDeviceEntity>().HasIndex(d => d.Token).IsUnique();
         b.Entity<PushDeviceEntity>().HasIndex(d => d.UserName);
         b.Entity<PushDeviceEntity>().HasIndex(d => d.Sid);

@@ -139,6 +139,34 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         return new(Visible(running), Visible(recent).Take(30).ToList(), open.Select(ToDto).ToList());
     }
 
+    // shortcut: aggrega in memoria i lavori e gli orari dei messaggi del periodo (al massimo 90 giorni); con volumi grandi va fatto in SQL.
+    public async Task<StatsDto> GetStatsAsync(string user, int days)
+    {
+        days = Math.Clamp(days, 1, 90);
+        var since = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(1 - days), TimeSpan.Zero);
+        await using var db = await dbf.CreateDbContextAsync();
+        var channels = await ChannelVisibility.Visible(db, user).ToDictionaryAsync(c => c.Id, c => c.Name);
+        var ids = channels.Keys.ToList();
+        var runs = await db.AgentRuns.Where(r => r.StartedAt >= since && ids.Contains(r.ChannelId)).ToListAsync();
+        var messages = await db.Messages.Where(m => m.At >= since && ids.Contains(m.ChannelId) && m.Kind != AuthorKind.System).Select(m => m.At).ToListAsync();
+        var tasks = await db.Tasks.Where(t => ids.Contains(t.ChannelId)).GroupBy(t => t.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync();
+
+        static DateOnly Day(DateTimeOffset at) => DateOnly.FromDateTime(at.UtcDateTime);
+        var runsByDay = runs.ToLookup(r => Day(r.StartedAt));
+        var messagesByDay = messages.CountBy(Day).ToDictionary();
+        var daily = Enumerable.Range(0, days).Select(i => DateOnly.FromDateTime(since.UtcDateTime).AddDays(i)).Select(d => new DayStatDto(d,
+            runsByDay[d].Count(), runsByDay[d].Count(r => r.Error != null), runsByDay[d].Sum(r => r.InputTokens), runsByDay[d].Sum(r => r.OutputTokens),
+            messagesByDay.GetValueOrDefault(d))).ToList();
+        var agents = runs.GroupBy(r => r.Agent).Select(g => new AgentStatDto(g.Key, g.Count(), g.Count(r => r.Error != null),
+            g.Sum(r => r.InputTokens), g.Sum(r => r.OutputTokens), g.Average(r => r.Seconds), g.Max(r => r.Seconds)))
+            .OrderByDescending(a => a.InputTokens + a.OutputTokens).ThenByDescending(a => a.Runs).ToList();
+        var models = runs.Where(r => r.Model != null).GroupBy(r => r.Model!).Select(g => new ModelStatDto(g.Key, g.Count(), g.Sum(r => r.InputTokens), g.Sum(r => r.OutputTokens)))
+            .OrderByDescending(m => m.InputTokens + m.OutputTokens).ToList();
+        var errors = runs.Where(r => r.Error != null).OrderByDescending(r => r.StartedAt).Take(20)
+            .Select(r => new AgentRunDto(r.Agent, r.ChannelId, channels[r.ChannelId], r.Kind, r.StartedAt, r.Seconds, r.Error)).ToList();
+        return new(days, daily, agents, models, errors, tasks.Select(t => new StatusCountDto(t.Key, t.Count)).OrderBy(t => t.Status).ToList());
+    }
+
     public async Task<List<SearchHitDto>> SearchAsync(string user, string query, int take = 50)
     {
         query = Required(query, 200, "Ricerca");
