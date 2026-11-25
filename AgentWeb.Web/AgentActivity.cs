@@ -51,7 +51,9 @@ public sealed class AgentActivity
     public static readonly AsyncLocal<Usage?> Current = new();
 
     // kind: "risposta" o "task" dal job; "delega" quando un agente lavora per un altro (ask_agent), con token e modello suoi.
-    public async Task TrackAsync(AgentJob job, Func<Task> work, string? kind = null)
+    // ct: il token del lavoro. Se è lui ad annullarlo (server che si ferma, redeploy) non è un errore e non va nello storico;
+    // un'OperationCanceledException senza ct annullato (es. timeout HTTP verso l'LLM) resta un errore vero.
+    public async Task TrackAsync(AgentJob job, Func<Task> work, string? kind = null, CancellationToken ct = default)
     {
         kind ??= job.TaskId is null ? "risposta" : "task";
         var run = new Run(Guid.NewGuid(), job.Agent, job.ChannelId, kind, DateTimeOffset.UtcNow);
@@ -63,7 +65,9 @@ public sealed class AgentActivity
         var usage = Current.Value = new Usage();
         var watch = Stopwatch.StartNew();
         string? error = null;
+        var cancelled = false;
         try { await work(); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { cancelled = true; throw; }
         catch (Exception ex)
         {
             error = ex.GetBaseException().Message;
@@ -74,10 +78,13 @@ public sealed class AgentActivity
         {
             running.TryRemove(run.Id, out _);
             var seconds = watch.Elapsed.TotalSeconds;
-            await SaveAsync(run, seconds, error, usage);
-            recent.Enqueue(run with { Seconds = seconds, Error = error });
-            while (recent.Count > Keep) recent.TryDequeue(out _);
-            KeyValuePair<string, object?>[] tags = [new("agent", job.Agent), new("kind", kind), new("outcome", error is null ? "ok" : "error")];
+            if (!cancelled)
+            {
+                await SaveAsync(run, seconds, error, usage);
+                recent.Enqueue(run with { Seconds = seconds, Error = error });
+                while (recent.Count > Keep) recent.TryDequeue(out _);
+            }
+            KeyValuePair<string, object?>[] tags = [new("agent", job.Agent), new("kind", kind), new("outcome", cancelled ? "cancelled" : error is null ? "ok" : "error")];
             Runs.Add(1, tags);
             Duration.Record(seconds, tags);
         }

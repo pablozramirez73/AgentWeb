@@ -119,7 +119,7 @@ public sealed class AgentRuntime(LlmClients llms, AgentSettingsStore store, Work
             // Un lavoro a sé: i token e il modello di chi risponde non finiscono nel lavoro di chi ha chiesto.
             var answer = "";
             await activity.TrackAsync(new AgentJob(call.ChannelId, name, null, call.Depth + 1),
-                async () => answer = await AskAsync(name, prompt, ct, call with { Depth = call.Depth + 1 }), "delega");
+                async () => answer = await AskAsync(name, prompt, ct, call with { Depth = call.Depth + 1 }), "delega", ct);
             if (answer.Length == 0) answer = "(nessuna risposta)";
             await ws.PostAsync(call.ChannelId, name, AuthorKind.Agent, answer, WorkspaceStore.NoMentions);
             return answer;
@@ -170,7 +170,7 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
                 if (job.TaskId is { } id) await RunTaskAsync(job, id, ct);
                 else await ReplyAsync(job, ct);
                 await SummarizeAsync(job, ct);
-            });
+            }, ct: ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

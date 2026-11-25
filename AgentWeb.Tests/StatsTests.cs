@@ -46,6 +46,30 @@ public sealed class StatsTests
         Assert.Empty(his.Errors);
     }
 
+    // Redeploy: i lavori annullati dal loro token non sono errori e non entrano nelle statistiche;
+    // un'annullamento che non viene dal token (es. timeout HTTP verso l'LLM) resta un errore.
+    [Fact]
+    public async Task CancelledRuns_AreNotErrors_ButTimeoutsAre()
+    {
+        using var app = new TestApp();
+        await app.CreateUserAsync("alice@test.it");
+        using var alice = await app.LoginAsync("alice@test.it");
+        var channel = await CreateChannelAsync(alice, "generale", false);
+        var activity = app.Services.GetRequiredService<AgentActivity>();
+
+        using var stopping = new CancellationTokenSource();
+        await stopping.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            activity.TrackAsync(new AgentJob(channel, "Ricercatore", null, 0), () => Task.Delay(1000, stopping.Token), ct: stopping.Token));
+        await Assert.ThrowsAsync<TaskCanceledException>(() =>
+            activity.TrackAsync(new AgentJob(channel, "Ricercatore", null, 0), () => throw new TaskCanceledException("timeout del modello"), ct: CancellationToken.None));
+
+        var stats = (await alice.GetFromJsonAsync<StatsDto>("/api/workspace/stats?days=1"))!;
+        Assert.Equal((1, 1), (stats.Daily[^1].Runs, stats.Daily[^1].Errors));
+        Assert.Equal("timeout del modello", Assert.Single(stats.Errors).Error);
+        Assert.Single(activity.Snapshot().Recent);
+    }
+
     static async Task<int> CreateChannelAsync(HttpClient http, string name, bool isPrivate)
     {
         var r = await http.PostAsJsonAsync("/api/workspace/channels", new NewChannelRequest(name, isPrivate));
