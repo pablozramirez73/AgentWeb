@@ -91,15 +91,18 @@ public sealed class StatsTests
         await ws.PostAsync(open, "Ricercatore", AuthorKind.Agent, "Ecco tre fonti.", WorkspaceStore.NoMentions);
         await ws.PostAsync(open, "Scrittore", AuthorKind.Agent, "Bozza pronta.", WorkspaceStore.NoMentions);
         await ws.PostAsync(secret, "Ricercatore", AuthorKind.Agent, "Riservato.", WorkspaceStore.NoMentions);
+        await ws.PostAsync(open, "Scrittore", AuthorKind.Agent, "Domanda per @RicercatoreSenior", WorkspaceStore.NoMentions);
+        await ws.PostAsync(open, "Scrittore", AuthorKind.Agent, "Grazie @ricercatore!", WorkspaceStore.NoMentions);
 
         var mine = (await alice.GetFromJsonAsync<AgentLogDto>("/api/workspace/agents/Ricercatore/log?days=1"))!;
         Assert.Equal(2, mine.Runs.Count);
-        Assert.Equal(["Riservato.", "Ecco tre fonti.", "→ chiedo a Ricercatore: fonti sul tema?"], mine.Messages.Select(m => m.Message.Text));
+        Assert.Equal((2, 1), (mine.Totals.Sum(t => t.Runs), mine.Totals.Sum(t => t.Delegations)));
+        Assert.Equal(["Grazie @ricercatore!", "Riservato.", "Ecco tre fonti.", "→ chiedo a Ricercatore: fonti sul tema?"], mine.Messages.Select(m => m.Message.Text));
 
         var his = (await bob.GetFromJsonAsync<AgentLogDto>("/api/workspace/agents/Ricercatore/log?days=1"))!;
         Assert.Equal("delega", Assert.Single(his.Runs).Kind);
         Assert.DoesNotContain(his.Messages, m => m.Message.ChannelId == secret);
-        Assert.Equal(2, his.Messages.Count);
+        Assert.Equal(3, his.Messages.Count);
     }
 
     static async Task<int> CreateChannelAsync(HttpClient http, string name, bool isPrivate)

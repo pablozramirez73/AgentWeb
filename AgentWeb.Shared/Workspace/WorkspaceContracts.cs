@@ -34,7 +34,9 @@ public sealed record StatusCountDto(WorkStatus Status, int Count);
 public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Recent, List<TaskDto> OpenTasks);
 // Statistiche → Agenti: un agente negli ultimi Days giorni, solo canali visibili, più recenti per primi (max 200 per elenco).
 // Messages: scritti da lui, che lo @menzionano o che gli delegano lavoro ("→ chiedo a <agente>:").
-public sealed record AgentLogDto(string Agent, List<RunLogDto> Runs, List<SearchHitDto> Messages);
+// Totals: per canale, su tutto il periodo (anche oltre i 200 lavori elencati).
+public sealed record AgentLogDto(string Agent, List<RunTotalsDto> Totals, List<RunLogDto> Runs, List<SearchHitDto> Messages);
+public sealed record RunTotalsDto(int ChannelId, int Runs, int Errors, int Delegations, long InputTokens, long OutputTokens);
 public sealed record RunLogDto(int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double Seconds, string? Error,
     string? Model, long InputTokens, long OutputTokens);
 

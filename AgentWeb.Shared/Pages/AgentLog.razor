@@ -63,11 +63,12 @@
             else
             {
                 var runs = log.Runs.Where(r => channel is null || r.ChannelId == channel).ToList();
+                var totals = log.Totals.Where(t => channel is null || t.ChannelId == channel).ToList();
                 var running = activity?.Running.Where(r => r.Agent == agent && (channel is null || r.ChannelId == channel)).ToList() ?? [];
                 <section class="tiles">
-                    <div class="tile"><span class="tile-label">Lavori</span><strong>@runs.Count</strong><span class="tile-sub">@runs.Count(r => r.Kind == "delega") deleghe ricevute</span></div>
-                    <div class="tile"><span class="tile-label">Errori</span><strong>@runs.Count(r => r.Error is not null)</strong><span class="tile-sub">nel periodo</span></div>
-                    <div class="tile"><span class="tile-label">Token</span><strong>@Num(runs.Sum(r => r.InputTokens + r.OutputTokens))</strong><span class="tile-sub">@Num(runs.Sum(r => r.InputTokens)) in · @Num(runs.Sum(r => r.OutputTokens)) out</span></div>
+                    <div class="tile"><span class="tile-label">Lavori</span><strong>@totals.Sum(t => t.Runs)</strong><span class="tile-sub">@totals.Sum(t => t.Delegations) deleghe ricevute</span></div>
+                    <div class="tile"><span class="tile-label">Errori</span><strong>@totals.Sum(t => t.Errors)</strong><span class="tile-sub">nel periodo</span></div>
+                    <div class="tile"><span class="tile-label">Token</span><strong>@Num(totals.Sum(t => t.InputTokens + t.OutputTokens))</strong><span class="tile-sub">@Num(totals.Sum(t => t.InputTokens)) in · @Num(totals.Sum(t => t.OutputTokens)) out</span></div>
                 </section>
 
                 <div class="card-block now">
@@ -164,11 +165,12 @@
     async Task LoadAsync()
     {
         if (agent is not { } a) return;
+        var d = days;
         error = null;
         try
         {
-            var l = await Ws.GetAgentLogAsync(a, days);
-            if (a == agent) log = l; // nel frattempo può averne scelto un altro
+            var l = await Ws.GetAgentLogAsync(a, d);
+            if (a == agent && d == days) log = l; // nel frattempo può aver scelto un altro agente o periodo
         }
         catch (Exception ex) { error = ex.GetBaseException().Message; }
     }
@@ -191,10 +193,11 @@
     // shortcut: lavori in corso ogni 5 s (come la pagina Attività) invece di un evento dedicato.
     async Task RefreshActivityAsync()
     {
+        var token = stop.Token; // letto subito: dopo Dispose leggere stop.Token lancia
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         try
         {
-            while (await timer.WaitForNextTickAsync(stop.Token))
+            while (await timer.WaitForNextTickAsync(token))
             {
                 try { activity = await Ws.GetActivityAsync(); } catch (Exception) { continue; }
                 await InvokeAsync(StateHasChanged);

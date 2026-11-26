@@ -195,15 +195,19 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await using var db = await dbf.CreateDbContextAsync();
         var channels = await ChannelVisibility.Visible(db, user).ToDictionaryAsync(c => c.Id, c => c.Name);
         var ids = channels.Keys.ToList();
-        var runs = await db.AgentRuns.Where(r => r.Agent == agent && r.StartedAt >= since && ids.Contains(r.ChannelId))
-            .OrderByDescending(r => r.StartedAt).Take(200).ToListAsync();
-        var name = agent.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
-        string mention = $"%@{name}%", asked = $"%→ chiedo a {name}:%";
+        var all = db.AgentRuns.Where(r => r.Agent == agent && r.StartedAt >= since && ids.Contains(r.ChannelId));
+        var runs = await all.OrderByDescending(r => r.StartedAt).Take(200).ToListAsync();
+        // Totali su tutto il periodo (l'elenco si ferma a 200), per canale così la pagina li filtra.
+        var totals = await all.GroupBy(r => r.ChannelId).Select(g => new RunTotalsDto(g.Key, g.Count(), g.Count(r => r.Error != null),
+            g.Count(r => r.Kind == "delega"), g.Sum(r => r.InputTokens), g.Sum(r => r.OutputTokens))).ToListAsync();
+        // @nome seguito da un carattere che non può stare in un nome (come MentionRegex): @Ricercatore non trova @RicercatoreSenior.
+        var name = Regex.Escape(agent);
+        string mention = $"@{name}([^[:alnum:]_-]|$)", asked = $"→ chiedo a {name}:";
         var messages = await db.Messages
             .Where(m => m.At >= since && ids.Contains(m.ChannelId) && m.Kind != AuthorKind.System
-                && (m.Author == agent || EF.Functions.ILike(m.Text, mention, "\\") || EF.Functions.ILike(m.Text, asked, "\\")))
+                && (m.Author == agent || Regex.IsMatch(m.Text, mention, RegexOptions.IgnoreCase) || Regex.IsMatch(m.Text, asked, RegexOptions.IgnoreCase)))
             .OrderByDescending(m => m.Id).Take(200).ToListAsync();
-        return new(agent,
+        return new(agent, totals,
             runs.Select(r => new RunLogDto(r.ChannelId, channels[r.ChannelId], r.Kind, r.StartedAt, r.Seconds, r.Error, r.Model, r.InputTokens, r.OutputTokens)).ToList(),
             messages.Select(m => new SearchHitDto(ToDto(m), channels[m.ChannelId])).ToList());
     }
