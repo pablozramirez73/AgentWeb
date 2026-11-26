@@ -85,6 +85,7 @@
                         @if (channelAgents.Agents.Count > 0) { <span> · @channelAgents.Agents.Count @(channelAgents.Agents.Count == 1 ? "agente" : "agenti")</span> }
                     </p>
                 </div>
+                <NotifySelect ChannelId="current.Id" />
                 <div class="nav-tabs" role="tablist">
                     <button class="nav-link @(tab == "msg" ? "active" : "")" role="tab" aria-selected="@(tab == "msg")" @onclick='() => tab = "msg"'>Messaggi</button>
                     <button class="nav-link @(tab == "task" ? "active" : "")" role="tab" aria-selected="@(tab == "task")" @onclick='() => tab = "task"'>

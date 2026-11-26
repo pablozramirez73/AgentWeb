@@ -105,6 +105,8 @@ public interface IWorkspaceClient
     Task MarkThreadReadAsync(int channelId, long rootId, long lastId); // segna letto il thread senza toccare il resto del canale
     Task<List<TaskDto>> GetTasksAsync(int channelId);
     Task<List<TaskDto>> GetAllTasksAsync();
+    Task<ChannelNotifyDto> GetChannelNotifyAsync(int channelId);
+    Task SetChannelNotifyAsync(int channelId, string level); // NotifyLevels
     Task<ChannelDto> OpenDirectAsync(string with); // conversazione diretta con una persona (email) o un agente: la crea la prima volta
     Task<List<string>> GetPeopleAsync();          // persone viste nei canali che l'utente vede (per scegliere a chi scrivere) // pagina Task: tutti i task dei canali visibili, aggiornati di recente per primi
     Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task);
@@ -138,6 +140,13 @@ public sealed record ProfileDto(string UserName, string? DisplayName, string? Av
 
 // Notifiche push. Kind del dispositivo: "web" (Web Push, Token = endpoint), "apns" (iPhone), "pushy" (Android).
 public sealed record NotificationSettingsDto(bool Mentions, bool Private, bool Tasks);
+// Notifiche di una sola conversazione. Default ("") = segue le impostazioni dell'account.
+public sealed record ChannelNotifyDto(string Level);
+public static class NotifyLevels
+{
+    public const string Default = "", All = "all", Mentions = "mentions", Mute = "mute";
+    public static readonly string[] Values = [Default, All, Mentions, Mute];
+}
 public sealed record PushDeviceRequest(string Kind, string Token, string? P256dh = null, string? Auth = null);
 public sealed record PushTokenRequest(string Token);
 public sealed record PushConfigDto(string VapidPublicKey, List<string> Kinds); // Kinds: i servizi attivi sul server

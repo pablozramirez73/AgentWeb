@@ -67,6 +67,37 @@ public sealed class PushTests
     }
 
     [Fact]
+    public async Task ConversationLevel_WinsOverAccountSettings()
+    {
+        using var app = new TestApp();
+        await app.CreateUserAsync(Alice); await app.CreateUserAsync(Bob);
+        using var alice = await app.LoginAsync(Alice);
+        using var bob = await app.LoginAsync(Bob);
+        (await bob.PostAsJsonAsync("/api/push/devices", Browser("https://push.example.com/bob"))).EnsureSuccessStatusCode();
+        var pub = await ChannelAsync(alice, "generale");
+        var dm = (await (await alice.PostAsJsonAsync("/api/workspace/direct", new { name = Bob })).Content.ReadFromJsonAsync<ChannelDto>())!.Id;
+        var secret = await ChannelAsync(alice, "segreto", isPrivate: true);
+        var notifier = app.Services.GetServices<IHostedService>().OfType<PushNotifier>().Single();
+        Task Set(int channel, string level) => bob.PutAsJsonAsync($"/api/workspace/channels/{channel}/notifications", new ChannelNotifyDto(level)).ContinueWith(t => t.Result.EnsureSuccessStatusCode());
+
+        Assert.Equal(NotifyLevels.Default, (await bob.GetFromJsonAsync<ChannelNotifyDto>($"/api/workspace/channels/{dm}/notifications"))!.Level);
+        Assert.Single(await notifier.RecipientsAsync(Message(dm, Alice, "ciao")));
+        await Set(dm, NotifyLevels.Mute);
+        Assert.Equal(NotifyLevels.Mute, (await bob.GetFromJsonAsync<ChannelNotifyDto>($"/api/workspace/channels/{dm}/notifications"))!.Level);
+        Assert.Empty(await notifier.RecipientsAsync(Message(dm, Alice, "ciao @bob")));
+        await Set(dm, NotifyLevels.Mentions);
+        Assert.Empty(await notifier.RecipientsAsync(Message(dm, Alice, "ciao")));
+        Assert.Single(await notifier.RecipientsAsync(Message(dm, Alice, "ciao @bob")));
+        await Set(pub, NotifyLevels.All); // ogni messaggio, anche in un canale pubblico
+        Assert.Single(await notifier.RecipientsAsync(Message(pub, Alice, "ciao a tutti")));
+        await Set(dm, NotifyLevels.Default);
+        Assert.Single(await notifier.RecipientsAsync(Message(dm, Alice, "ciao")));
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await bob.PutAsJsonAsync($"/api/workspace/channels/{pub}/notifications", new ChannelNotifyDto("forte"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await bob.PutAsJsonAsync($"/api/workspace/channels/{secret}/notifications", new ChannelNotifyDto(NotifyLevels.All))).StatusCode);
+    }
+
+    [Fact]
     public async Task Registration_RejectsServicesTheServerDoesNotRun_AndBadEndpoints()
     {
         using var app = new TestApp();

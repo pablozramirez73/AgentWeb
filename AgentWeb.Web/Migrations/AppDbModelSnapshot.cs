@@ -17,7 +17,7 @@ partial class AppDbModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261125212403_AgentRuns";
+    public override string LastMigrationId => "20261126090020_ChannelNotify";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -234,6 +234,24 @@ partial class AppDbModelSnapshot : ModelSnapshot
                 b.HasIndex("UserName");
 
                 b.ToTable("ChannelMembers");
+            });
+
+        modelBuilder.Entity("AgentWeb.Web.ChannelNotifyEntity", b =>
+            {
+                b.Property<string>("UserName")
+                    .HasColumnType("text");
+
+                b.Property<int>("ChannelId")
+                    .HasColumnType("integer");
+
+                b.Property<string>("Level")
+                    .IsRequired()
+                    .HasMaxLength(10)
+                    .HasColumnType("character varying(10)");
+
+                b.HasKey("UserName", "ChannelId");
+
+                b.ToTable("ChannelNotify");
             });
 
         modelBuilder.Entity("AgentWeb.Web.DaemonDeliveryEntity", b =>

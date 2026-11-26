@@ -73,6 +73,24 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             """);
     }
 
+    public async Task<ChannelNotifyDto> GetChannelNotifyAsync(int channelId, string user)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
+        return new(await db.ChannelNotify.Where(n => n.UserName == user && n.ChannelId == channelId).Select(n => n.Level).FirstOrDefaultAsync() ?? NotifyLevels.Default);
+    }
+
+    public async Task SetChannelNotifyAsync(int channelId, string user, string level)
+    {
+        if (!NotifyLevels.Values.Contains(level)) throw new ArgumentException($"Livello di notifica \"{level}\" non valido.");
+        await using var db = await dbf.CreateDbContextAsync();
+        await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
+        await db.ChannelNotify.Where(n => n.UserName == user && n.ChannelId == channelId).ExecuteDeleteAsync();
+        if (level == NotifyLevels.Default) return;
+        db.ChannelNotify.Add(new() { UserName = user, ChannelId = channelId, Level = level });
+        await db.SaveChangesAsync();
+    }
+
     public async Task MarkThreadReadAsync(int channelId, string user, long rootId, long lastId)
     {
         await using var db = await dbf.CreateDbContextAsync();

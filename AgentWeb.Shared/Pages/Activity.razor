@@ -153,6 +153,7 @@
                     }
                     @if (people.Count > 3) { <span class="people-more">+@(people.Count - 3)</span> }
                 </span>
+                @if (sel.RootId is null) { <NotifySelect ChannelId="sel.ChannelId" /> }
                 <button class="btn btn-icon" aria-label="Chiudi" @onclick="Close">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
                 </button>

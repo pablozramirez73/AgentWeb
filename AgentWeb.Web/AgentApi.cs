@@ -86,6 +86,12 @@ public static class AgentApi
         ws.MapGet("/activity", (WorkspaceStore s, AgentActivity a, ClaimsPrincipal u) => s.GetActivityAsync(User(u), a));
         ws.MapGet("/stats", (int? days, WorkspaceStore s, ClaimsPrincipal u) => s.GetStatsAsync(User(u), days ?? 30));
         ws.MapGet("/tasks", (WorkspaceStore s, ClaimsPrincipal u) => s.GetAllTasksAsync(User(u)));
+        ws.MapGet("/channels/{id:int}/notifications", (int id, WorkspaceStore s, ClaimsPrincipal u) => s.GetChannelNotifyAsync(id, User(u)));
+        ws.MapPut("/channels/{id:int}/notifications", async (int id, ChannelNotifyDto b, WorkspaceStore s, ClaimsPrincipal u) =>
+        {
+            await s.SetChannelNotifyAsync(id, User(u), b.Level);
+            return Results.NoContent();
+        });
         ws.MapPost("/direct", (NameBody b, WorkspaceStore s, ClaimsPrincipal u) => s.OpenDirectAsync(User(u), b.Name));
         ws.MapGet("/people", (WorkspaceStore s, ClaimsPrincipal u) => s.GetPeopleAsync(User(u)));
         ws.MapGet("/channels/{id:int}/tasks", (int id, WorkspaceStore s, ClaimsPrincipal u) => s.GetTasksAsync(id, User(u)));

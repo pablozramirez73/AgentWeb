@@ -173,6 +173,7 @@ public sealed partial class PushNotifier(WorkspaceBus bus, IDbContextFactory<App
         // Solo chi ha almeno un dispositivo registrato: gli altri non riceverebbero comunque niente.
         var users = await db.Users.Where(u => db.PushDevices.Any(d => d.UserName == u.UserName))
             .Select(u => new { Name = u.UserName!, u.NotifyMentions, u.NotifyPrivate, u.NotifyTasks }).ToListAsync();
+        var levels = await db.ChannelNotify.Where(n => n.ChannelId == e.ChannelId).ToDictionaryAsync(n => n.UserName, n => n.Level);
         var url = $"channels/{e.ChannelId}";
         var result = new List<(string, PushNote)>();
 
@@ -182,8 +183,11 @@ public sealed partial class PushNotifier(WorkspaceBus bus, IDbContextFactory<App
             var body = m.Text.Length > 140 ? m.Text[..140] + "…" : m.Text;
             foreach (var u in users.Where(u => u.Name != m.Author))
             {
-                var mention = u.NotifyMentions && mentioned.Contains(Handle(u.Name));
-                if (!mention && !(u.NotifyPrivate && ch.IsPrivate)) continue;
+                // La scelta fatta sulla conversazione vince su quelle dell'account.
+                var level = levels.GetValueOrDefault(u.Name, NotifyLevels.Default);
+                if (level == NotifyLevels.Mute) continue;
+                var mention = (u.NotifyMentions || level != NotifyLevels.Default) && mentioned.Contains(Handle(u.Name));
+                if (!mention && !(level == NotifyLevels.All || level == NotifyLevels.Default && u.NotifyPrivate && ch.IsPrivate)) continue;
                 if (!await ChannelVisibility.CanAccessAsync(db, e.ChannelId, u.Name)) continue;
                 var title = ch.DirectKey is not null ? $"{Handle(m.Author)} ti ha scritto"
                     : mention ? $"{Handle(m.Author)} ti ha menzionato in #{ch.Name}" : $"#{ch.Name} · {Handle(m.Author)}";

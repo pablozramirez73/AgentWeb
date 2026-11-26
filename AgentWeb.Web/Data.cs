@@ -75,6 +75,15 @@ public sealed class ChannelMemberEntity
     public DateTimeOffset AddedAt { get; set; }
 }
 
+// Notifiche scelte per una conversazione (canale o messaggio diretto): vince sulle impostazioni dell'account.
+// Nessuna riga = predefinite. Level: NotifyLevels.All / Mentions / Mute.
+public sealed class ChannelNotifyEntity
+{
+    public string UserName { get; set; } = "";
+    public int ChannelId { get; set; }
+    public string Level { get; set; } = "";
+}
+
 public sealed class MessageEntity
 {
     public long Id { get; set; }
@@ -187,6 +196,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
     public DbSet<DaemonDeliveryEntity> DaemonDeliveries => Set<DaemonDeliveryEntity>();
     public DbSet<DaemonMachineEntity> DaemonMachines => Set<DaemonMachineEntity>();
     public DbSet<PushDeviceEntity> PushDevices => Set<PushDeviceEntity>();
+    public DbSet<ChannelNotifyEntity> ChannelNotify => Set<ChannelNotifyEntity>();
     public DbSet<AgentRunEntity> AgentRuns => Set<AgentRunEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -202,6 +212,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         b.Entity<AgentRunEntity>().Property(r => r.Kind).HasMaxLength(20);
         b.Entity<AgentRunEntity>().Property(r => r.Model).HasMaxLength(200);
         b.Entity<AgentRunEntity>().Property(r => r.Error).HasMaxLength(2000);
+        b.Entity<ChannelNotifyEntity>().HasKey(n => new { n.UserName, n.ChannelId });
+        b.Entity<ChannelNotifyEntity>().Property(n => n.Level).HasMaxLength(10);
         b.Entity<PushDeviceEntity>().HasIndex(d => d.Token).IsUnique();
         b.Entity<PushDeviceEntity>().HasIndex(d => d.UserName);
         b.Entity<PushDeviceEntity>().HasIndex(d => d.Sid);
