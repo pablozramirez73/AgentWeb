@@ -74,6 +74,7 @@ public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus,
     public Task<string> WhoAmIAsync() => UserAsync();
     public async Task<ActivityDto> GetActivityAsync() => await store.GetActivityAsync(await UserAsync(), activity);
     public async Task<StatsDto> GetStatsAsync(int days) => await store.GetStatsAsync(await UserAsync(), days);
+    public async Task<AgentLogDto> GetAgentLogAsync(string agent, int days) => await store.GetAgentLogAsync(await UserAsync(), agent, days);
     public async Task<List<FeedItemDto>> GetFeedAsync() => await store.GetFeedAsync(await UserAsync());
     public async Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId) => await store.GetThreadAsync(channelId, await UserAsync(), rootId);
     public async Task MarkThreadReadAsync(int channelId, long rootId, long lastId) => await store.MarkThreadReadAsync(channelId, await UserAsync(), rootId, lastId);

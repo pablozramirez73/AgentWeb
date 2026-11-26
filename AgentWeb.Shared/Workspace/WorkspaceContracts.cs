@@ -32,6 +32,11 @@ public sealed record AgentStatDto(string Agent, int Runs, int Errors, long Input
 public sealed record ModelStatDto(string Model, int Runs, long InputTokens, long OutputTokens);
 public sealed record StatusCountDto(WorkStatus Status, int Count);
 public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Recent, List<TaskDto> OpenTasks);
+// Statistiche → Agenti: un agente negli ultimi Days giorni, solo canali visibili, più recenti per primi (max 200 per elenco).
+// Messages: scritti da lui, che lo @menzionano o che gli delegano lavoro ("→ chiedo a <agente>:").
+public sealed record AgentLogDto(string Agent, List<RunLogDto> Runs, List<SearchHitDto> Messages);
+public sealed record RunLogDto(int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double Seconds, string? Error,
+    string? Model, long InputTokens, long OutputTokens);
 
 // Pagina Attività (inbox): una voce per canale (Root = null) o per thread che ti riguarda (scritto, risposto o menzionato).
 // Last: l'ultimo messaggio (del canale fuori dai thread, oppure del thread). Unread: messaggi altrui non ancora letti.
@@ -100,6 +105,7 @@ public interface IWorkspaceClient
     Task<string> WhoAmIAsync(); // utente corrente (per riconoscere le proprie @menzioni)
     Task<ActivityDto> GetActivityAsync(); // cosa stanno facendo gli agenti, solo nei canali visibili
     Task<StatsDto> GetStatsAsync(int days); // token, errori e lavori degli ultimi giorni, solo nei canali visibili
+    Task<AgentLogDto> GetAgentLogAsync(string agent, int days); // lavori e messaggi di un agente, solo nei canali visibili
     Task<List<FeedItemDto>> GetFeedAsync(); // inbox della pagina Attività, più recenti per primi
     Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId);
     Task MarkThreadReadAsync(int channelId, long rootId, long lastId); // segna letto il thread senza toccare il resto del canale

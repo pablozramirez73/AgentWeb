@@ -186,6 +186,28 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         return new(days, daily, agents, models, errors, tasks.Select(t => new StatusCountDto(t.Key, t.Count)).OrderBy(t => t.Status).ToList());
     }
 
+    // Statistiche → Agenti: cosa fa un agente (storico dei lavori) e la sua comunicazione con persone e altri agenti
+    // (suoi messaggi, @menzioni, deleghe ricevute), solo nei canali visibili (ChannelVisibility).
+    public async Task<AgentLogDto> GetAgentLogAsync(string user, string agent, int days)
+    {
+        agent = Required(agent, 256, "Agente");
+        var since = DateTimeOffset.UtcNow.AddDays(-Math.Clamp(days, 1, 90));
+        await using var db = await dbf.CreateDbContextAsync();
+        var channels = await ChannelVisibility.Visible(db, user).ToDictionaryAsync(c => c.Id, c => c.Name);
+        var ids = channels.Keys.ToList();
+        var runs = await db.AgentRuns.Where(r => r.Agent == agent && r.StartedAt >= since && ids.Contains(r.ChannelId))
+            .OrderByDescending(r => r.StartedAt).Take(200).ToListAsync();
+        var name = agent.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+        string mention = $"%@{name}%", asked = $"%→ chiedo a {name}:%";
+        var messages = await db.Messages
+            .Where(m => m.At >= since && ids.Contains(m.ChannelId) && m.Kind != AuthorKind.System
+                && (m.Author == agent || EF.Functions.ILike(m.Text, mention, "\\") || EF.Functions.ILike(m.Text, asked, "\\")))
+            .OrderByDescending(m => m.Id).Take(200).ToListAsync();
+        return new(agent,
+            runs.Select(r => new RunLogDto(r.ChannelId, channels[r.ChannelId], r.Kind, r.StartedAt, r.Seconds, r.Error, r.Model, r.InputTokens, r.OutputTokens)).ToList(),
+            messages.Select(m => new SearchHitDto(ToDto(m), channels[m.ChannelId])).ToList());
+    }
+
     public async Task<List<SearchHitDto>> SearchAsync(string user, string query, int take = 50)
     {
         query = Required(query, 200, "Ricerca");

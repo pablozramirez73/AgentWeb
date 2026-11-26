@@ -1,0 +1,4 @@
+.stats-tabs { display: inline-flex; gap: .25rem; margin-right: auto; }
+.stats-tabs ::deep a { padding: .35rem .75rem; border-radius: 8px; color: var(--muted); font-weight: 600; text-decoration: none; }
+.stats-tabs ::deep a:hover { color: var(--text); background: var(--surface-2); }
+.stats-tabs ::deep a.active { color: var(--text); background: var(--ink-soft); }
