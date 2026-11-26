@@ -8,14 +8,15 @@ using Microsoft.EntityFrameworkCore;
 namespace AgentWeb.Web;
 
 // Eventi in tempo reale dentro il processo: li ascoltano le pagine Blazor Server e l'hub SignalR (che li instrada per canale).
-public sealed class WorkspaceBus
+public sealed class WorkspaceBus(ILogger<WorkspaceBus> log)
 {
     public event Action<WorkspaceEvent>? Published;
 
     public void Publish(WorkspaceEvent e)
     {
         foreach (var h in Published?.GetInvocationList().Cast<Action<WorkspaceEvent>>() ?? [])
-            try { h(e); } catch { /* un client rotto non deve fermare gli altri */ }
+            try { h(e); } // un client rotto non deve fermare gli altri, ma deve restare traccia
+            catch (Exception ex) { log.LogWarning(ex, "Evento {Kind} del canale {Channel} non consegnato a {Handler}", e.Kind, e.ChannelId, h.Method.DeclaringType?.Name); }
     }
 }
 
@@ -640,9 +641,9 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         bus.Publish(new("task", m.ChannelId, Task: dto));
         if (agent is not null)
         {
-            // Conferma nel thread della richiesta: lì l'agente lavora e consegna.
-            await PostAsync(m.ChannelId, agent, AuthorKind.Agent, $"Lo prendo io come task #{t.Id}." + (string.IsNullOrWhiteSpace(plan) ? "" : $"\n{plan.Trim()}"), NoMentions, parentId: m.Id);
+            // Prima in coda: se la conferma non si pubblica il task parte lo stesso. La conferma va nel thread della richiesta.
             queue.Enqueue(new(m.ChannelId, agent, t.Id, 0, m.Id));
+            await PostAsync(m.ChannelId, agent, AuthorKind.Agent, $"Lo prendo io come task #{t.Id}." + (string.IsNullOrWhiteSpace(plan) ? "" : $"\n{plan.Trim()}"), NoMentions, parentId: m.Id);
         }
         return dto;
     }

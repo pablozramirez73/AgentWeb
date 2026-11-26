@@ -230,6 +230,7 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
     async Task RunTaskAsync(AgentJob job, int taskId, CancellationToken ct)
     {
         if (await ws.StartTaskAsync(taskId) is not { } task) return; // già preso o chiuso
+        string result;
         try
         {
             // Task nato da un messaggio: il thread della richiesta è la sua conversazione (risultato, domande, correzioni).
@@ -247,26 +248,27 @@ public sealed class AgentWorker(AgentQueue queue, WorkspaceStore ws, AgentRuntim
                 prima di chiuderlo, inizia la risposta con "{HandMarker}" e scrivi cosa gli serve fare (o il risultato da controllare).
                 Altrimenti rispondi solo con il risultato completo del task, senza ripetere la richiesta né il tuo nome.
                 """;
-            var result = (await runtime.AskAsync(job.Agent, prompt, ct, new AgentCall(job.ChannelId, 0, $"{task.Title}\n{task.Description}"))).Trim();
-            if (result.Length == 0) result = "(nessun risultato)";
-            if (result.StartsWith(HandMarker, StringComparison.OrdinalIgnoreCase))
-            {
-                var note = result[HandMarker.Length..].Trim();
-                var text = await ws.HandToRequesterAsync(taskId, note)
-                    ? $"@{task.CreatedBy.Split('@')[0]} il task #{task.Id} passa a te:\n{note}"
-                    : $"Task #{task.Id} «{task.Title}» fermo: mi serve una decisione che un agente non può prendere.\n{note}";
-                await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, text, WorkspaceStore.NoMentions, parentId: task.MessageId);
-                return;
-            }
-            await ws.FinishTaskAsync(taskId, WorkStatus.Done, result);
-            if (task.MessageId is { } r) await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, result, WorkspaceStore.NoMentions, parentId: r);
-            else await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, $"Task #{task.Id} «{task.Title}» completato:\n{result}", job.Depth);
+            result = (await runtime.AskAsync(job.Agent, prompt, ct, new AgentCall(job.ChannelId, 0, $"{task.Title}\n{task.Description}"))).Trim();
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             await ws.FinishTaskAsync(taskId, WorkStatus.Failed, ex.GetBaseException().Message);
             throw;
         }
+        // Da qui il lavoro è fatto: un errore nel pubblicare non deve trasformare il task in «Fallito» perdendo il risultato.
+        if (result.Length == 0) result = "(nessun risultato)";
+        if (result.StartsWith(HandMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            var note = result[HandMarker.Length..].Trim();
+            var text = await ws.HandToRequesterAsync(taskId, note)
+                ? $"@{task.CreatedBy.Split('@')[0]} il task #{task.Id} passa a te:\n{note}"
+                : $"Task #{task.Id} «{task.Title}» fermo: mi serve una decisione che un agente non può prendere.\n{note}";
+            await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, text, WorkspaceStore.NoMentions, parentId: task.MessageId);
+            return;
+        }
+        await ws.FinishTaskAsync(taskId, WorkStatus.Done, result);
+        if (task.MessageId is { } r) await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, result, WorkspaceStore.NoMentions, parentId: r);
+        else await ws.PostAsync(job.ChannelId, job.Agent, AuthorKind.Agent, $"Task #{task.Id} «{task.Title}» completato:\n{result}", job.Depth);
     }
 }
 

@@ -64,7 +64,8 @@ public static class Daemon
             {
                 HttpResponseMessage r;
                 try { r = await api.SendRawAsync(HttpMethod.Post, "api/daemon/poll", new DaemonPollRequest(machine, [.. byName.Keys]), stop.Token); }
-                catch (HttpRequestException ex)
+                // Anche il timeout di HttpClient (TaskCanceledException senza stop): è rete lenta, non uno spegnimento.
+                catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException && !stop.IsCancellationRequested)
                 {
                     env.Err.WriteLine($"daemon: server non raggiungibile ({ex.Message}), riprovo tra 5 s");
                     await Task.Delay(TimeSpan.FromSeconds(5), stop.Token);
@@ -154,8 +155,9 @@ public static class Daemon
 
         var stdout = ReadCappedAsync(process.StandardOutput);
         var stderr = ReadCappedAsync(process.StandardError);
-        await process.StandardInput.WriteAsync(d.Prompt);
-        process.StandardInput.Close();
+        // Un runtime che esce subito (o non legge stdin) chiude la pipe: l'esito lo danno codice d'uscita e stderr.
+        try { await process.StandardInput.WriteAsync(d.Prompt); process.StandardInput.Close(); }
+        catch (IOException) { }
 
         var heartbeat = Task.Run(async () =>
         {
@@ -167,7 +169,8 @@ public static class Daemon
                     using var h = await api.SendRawAsync(HttpMethod.Post, $"api/daemon/deliveries/{d.Id}/heartbeat", null, run.Token);
                     if (h.StatusCode == HttpStatusCode.NotFound) return; // annullata o riassegnata
                 }
-                catch (HttpRequestException) { } // rete assente per un attimo: ci pensa il lease se dura troppo
+                // Rete assente o lenta per un attimo (anche il timeout di HttpClient): ci pensa il lease se dura troppo.
+                catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException && !run.IsCancellationRequested) { }
             }
         });
 

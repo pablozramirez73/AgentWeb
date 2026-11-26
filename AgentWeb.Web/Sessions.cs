@@ -98,11 +98,11 @@ public sealed class SessionStore(IDbContextFactory<AppDb> dbf, SessionConnection
         return n > 0;
     }
 
-    // except: la sessione da lasciare aperta; logins = solo web/app (i token MCP restano validi).
-    public async Task<int> RevokeAllAsync(string userName, string? except = null, bool logins = false)
+    // except: la sessione da lasciare aperta. Chiude anche i token (MCP, CLI, daemon): chi ha rubato la password può averne creato uno.
+    public async Task<int> RevokeAllAsync(string userName, string? except = null)
     {
         await using var db = await dbf.CreateDbContextAsync();
-        var ids = await db.UserSessions.Where(s => s.UserName == userName && s.RevokedAt == null && s.Id != except && (!logins || s.Kind != "token"))
+        var ids = await db.UserSessions.Where(s => s.UserName == userName && s.RevokedAt == null && s.Id != except)
             .Select(s => s.Id).ToListAsync();
         await db.UserSessions.Where(s => ids.Contains(s.Id)).ExecuteUpdateAsync(u => u.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
         await db.PushDevices.Where(d => d.Sid != null && ids.Contains(d.Sid)).ExecuteDeleteAsync();
@@ -315,14 +315,14 @@ public static class SessionEndpoints
             await s.RevokeAsync(id, u.Identity!.Name!) ? Results.NoContent() : Results.NotFound());
         mine.MapPost("/revoke-all", async (ClaimsPrincipal u, SessionStore s) => Results.Ok(await s.RevokeAllAsync(u.Identity!.Name!)));
 
-        // Cambio password: serve quella attuale; le altre sessioni web/app si chiudono (chi conosceva la vecchia è fuori).
+        // Cambio password: serve quella attuale; le altre sessioni e i token si chiudono (chi conosceva la vecchia è fuori).
         app.MapPost("/api/account/password", async (ChangePasswordRequest req, ClaimsPrincipal u, UserManager<AppUser> users, SessionStore s) =>
         {
             var user = await users.FindByNameAsync(u.Identity!.Name!);
             if (user is null) return Results.Unauthorized();
             var r = await users.ChangePasswordAsync(user, req.CurrentPassword ?? "", req.NewPassword ?? "");
             if (!r.Succeeded) return Results.Text(string.Join(" ", r.Errors.Select(e => e.Description)), statusCode: 400);
-            await s.RevokeAllAsync(user.UserName!, except: u.FindFirstValue(SessionStore.Claim), logins: true);
+            await s.RevokeAllAsync(user.UserName!, except: u.FindFirstValue(SessionStore.Claim));
             return Results.NoContent();
         }).RequireAuthorization().RequireRateLimiting(AuthRateLimit);
 

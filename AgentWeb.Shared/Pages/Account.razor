@@ -84,7 +84,7 @@
 
         <h3 class="section-label">Password</h3>
         <div class="card-block">
-            <p class="text-muted">Gli altri browser e app dovranno accedere di nuovo; i token MCP restano validi.</p>
+            <p class="text-muted">Gli altri browser e app dovranno accedere di nuovo e i token (MCP, CLI, daemon) smettono di funzionare: vanno ricreati.</p>
             <form @onsubmit="ChangePasswordAsync" class="d-flex flex-column gap-2" style="max-width: 420px">
                 <input class="form-control" type="password" autocomplete="current-password" @bind="currentPassword" @bind:event="oninput" placeholder="Password attuale" aria-label="Password attuale" />
                 <input class="form-control" type="password" autocomplete="new-password" @bind="newPassword" @bind:event="oninput" placeholder="Nuova password" aria-label="Nuova password" />

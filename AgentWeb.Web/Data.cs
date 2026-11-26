@@ -221,7 +221,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         b.Entity<PushDeviceEntity>().Property(d => d.Token).HasMaxLength(1000);
         b.Entity<ChannelEntity>().HasIndex(c => c.Name).IsUnique();
         b.Entity<ChannelEntity>().HasIndex(c => c.DirectKey).IsUnique();
-        b.Entity<MessageEntity>().HasIndex(m => m.ChannelId);
+        // (ChannelId, Id): i non letti (Id > cursore) si contano leggendo solo i messaggi nuovi, non tutta la storia del canale.
+        b.Entity<MessageEntity>().HasIndex(m => new { m.ChannelId, m.Id });
         b.Entity<MessageEntity>().HasIndex(m => new { m.ChannelId, m.Author, m.ClientId }).IsUnique().HasFilter("\"ClientId\" IS NOT NULL");
         b.Entity<MessageEntity>().HasIndex(m => m.ParentId).HasFilter("\"ParentId\" IS NOT NULL");
         // Ricerca full-text dei messaggi (to_tsvector 'simple': nessuna lingua imposta, parole intere).

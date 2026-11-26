@@ -16,6 +16,7 @@ public sealed record MemoryHit(long Id, string Scope, string Kind, string? Title
 public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration config, ILogger<MemoryStore> log)
 {
     public const int Dimensions = 768;
+    const int EmbedBatch = 64;
     const int ChunkChars = 900, ChunkOverlap = 150, MaxDocumentChars = 1_000_000;
 
     IEmbeddingGenerator<string, Embedding<float>>? embedder;
@@ -36,7 +37,9 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         if (text.Length > MaxDocumentChars) throw new ArgumentException("Documento troppo grande: massimo circa 1 MB di testo.");
         var chunks = Chunk(text).ToList();
         if (chunks.Count == 0) throw new ArgumentException("Il documento è vuoto.");
-        var vectors = await EmbedAsync(chunks, ct);
+        // A gruppi: un documento da 1 MB sono ~1.300 pezzi, troppi per una sola chiamata entro il timeout dell'embedding.
+        var vectors = new List<float[]>(chunks.Count);
+        foreach (var batch in chunks.Chunk(EmbedBatch)) vectors.AddRange(await EmbedAsync(batch, ct));
         var source = Guid.NewGuid().ToString("N");
         await using var db = await dbf.CreateDbContextAsync(ct);
         var rows = chunks.Select(c => new MemoryEntity
@@ -46,7 +49,15 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         }).ToList();
         db.Memories.AddRange(rows);
         await db.SaveChangesAsync(ct);
-        for (var i = 0; i < rows.Count; i++) await SetEmbeddingAsync(db, rows[i].Id, vectors[i], ct);
+        for (var i = 0; i < rows.Count; i += EmbedBatch) // un UPDATE per gruppo invece di uno per pezzo
+        {
+            var n = Math.Min(EmbedBatch, rows.Count - i);
+            await db.Database.ExecuteSqlRawAsync("""
+                UPDATE "Memories" m SET "Embedding" = CAST(v.e AS vector)
+                FROM unnest(@ids, @vecs) AS v(id, e) WHERE m."Id" = v.id
+                """, [new NpgsqlParameter("ids", rows.Skip(i).Take(n).Select(r => r.Id).ToArray()),
+                      new NpgsqlParameter("vecs", vectors.Skip(i).Take(n).Select(Literal).ToArray())], ct);
+        }
         return rows.Count;
     }
 

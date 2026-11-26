@@ -4,6 +4,7 @@ using System.Text.Json;
 using AgentWeb.Shared.Agents;
 using AgentWeb.Shared.Workspace;
 using AgentWeb.Web;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -160,6 +161,14 @@ public sealed class Phase9ToolsAndMemoryTests : IAsyncLifetime
         var lungo = (await alice.GetFromJsonAsync<List<MemoryDto>>($"/api/workspace/channels/{channel}/memory"))!.Single(m => m.Kind == "document");
         Assert.True(lungo.Chunks > 1);
         Assert.Equal("# Titolo", lungo.Content.Trim());
+
+        // Oltre un gruppo di embedding (64 pezzi): ogni pezzo ha il suo vettore.
+        var many = string.Join("\n\n", Enumerable.Range(0, 100).Select(i => $"Paragrafo {i}: " + string.Join(" ", Enumerable.Repeat($"testo{i}", 100))));
+        Assert.Equal(HttpStatusCode.OK, (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/documents", new { fileName = "molti.md", text = many })).StatusCode);
+        await using var db = await app.Services.GetRequiredService<IDbContextFactory<AppDb>>().CreateDbContextAsync();
+        var counts = await db.Database.SqlQuery<int>($"""SELECT COUNT(*) FILTER (WHERE "Embedding" IS NULL) AS "Value" FROM "Memories" WHERE "Title" = 'molti.md'""").SingleAsync();
+        Assert.Equal(0, counts);
+        Assert.True(await db.Memories.CountAsync(m => m.Title == "molti.md") > 64);
     }
 
     [Fact]

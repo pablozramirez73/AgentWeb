@@ -142,7 +142,7 @@ public sealed class LocalAccountClient(SessionStore sessions, AuthenticationStat
         var user = await users.FindByNameAsync(u) ?? throw new UnauthorizedAccessException();
         var r = await users.ChangePasswordAsync(user, currentPassword, newPassword);
         if (!r.Succeeded) throw new InvalidOperationException(string.Join(" ", r.Errors.Select(e => e.Description)));
-        await sessions.RevokeAllAsync(u, except: sid, logins: true);
+        await sessions.RevokeAllAsync(u, except: sid);
     }
     public async Task<ApiTokenDto> CreateTokenAsync(string name) { var (u, _) = await CurrentAsync(); return await sessions.CreateTokenAsync(u, name); }
 
