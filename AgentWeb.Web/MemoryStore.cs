@@ -114,11 +114,14 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         await using var db = await dbf.CreateDbContextAsync(ct);
         var rows = await db.Memories.AsNoTracking().Where(m => m.Scope == "channel" && m.ChannelId == channelId).OrderByDescending(m => m.Id).ToListAsync(ct);
         var docs = rows.Where(m => m.Kind == "document").GroupBy(m => m.SourceId)
-            .Select(g => new MemoryDto(g.Min(m => m.Id), "document", g.First().Title, g.OrderBy(m => m.Id).First().Content[..Math.Min(200, g.First().Content.Length)],
+            .Select(g => new MemoryDto(g.Min(m => m.Id), "document", g.First().Title, Preview(g.MinBy(m => m.Id)!.Content),
                 g.First().CreatedBy, g.First().CreatedAt, g.Key, g.Count()));
         var others = rows.Where(m => m.Kind != "document").Select(m => new MemoryDto(m.Id, m.Kind, m.Title, m.Content, m.CreatedBy, m.CreatedAt, null, 1));
         return [.. others.Concat(docs).OrderByDescending(m => m.CreatedAt)];
     }
+
+    // Anteprima del primo pezzo del documento (le righe sono ordinate per Id decrescente: First() è l'ultimo pezzo).
+    static string Preview(string content) => content.Length > 200 ? content[..200] : content;
 
     public async Task<bool> DeleteChannelMemoryAsync(int channelId, long id, CancellationToken ct = default)
     {

@@ -153,6 +153,13 @@ public sealed class Phase9ToolsAndMemoryTests : IAsyncLifetime
         var doc = (await alice.GetFromJsonAsync<List<MemoryDto>>($"/api/workspace/channels/{channel}/memory"))!.Single(m => m.Kind == "document");
         Assert.Equal(HttpStatusCode.Forbidden, (await bob.DeleteAsync($"/api/workspace/channels/{channel}/documents/{doc.SourceId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await alice.DeleteAsync($"/api/workspace/channels/{channel}/documents/{doc.SourceId}")).StatusCode);
+
+        // Più parti, la prima corta (un titolo): l'anteprima è del primo pezzo, non tagliata con la lunghezza di un altro (andava in errore).
+        var big = "# Titolo\n\n" + string.Join(" ", Enumerable.Repeat("parola", 1000));
+        Assert.Equal(HttpStatusCode.OK, (await alice.PostAsJsonAsync($"/api/workspace/channels/{channel}/documents", new { fileName = "lungo.md", text = big })).StatusCode);
+        var lungo = (await alice.GetFromJsonAsync<List<MemoryDto>>($"/api/workspace/channels/{channel}/memory"))!.Single(m => m.Kind == "document");
+        Assert.True(lungo.Chunks > 1);
+        Assert.Equal("# Titolo", lungo.Content.Trim());
     }
 
     [Fact]
