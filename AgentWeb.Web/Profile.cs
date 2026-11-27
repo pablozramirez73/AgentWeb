@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.AspNetCore.Identity;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Profilo dell'utente (nome visualizzato, foto), verifica dell'email e accessi esterni (Google, GitHub).
@@ -24,7 +26,7 @@ public static class Profile
     public static async Task SaveAsync(UserManager<AppUser> users, AppUser user, string? displayName)
     {
         displayName = displayName?.Trim();
-        if (displayName?.Length > 60) throw new ArgumentException("Nome visualizzato: al massimo 60 caratteri.");
+        if (displayName?.Length > 60) throw new ArgumentException(T("profile.nameLength"));
         user.DisplayName = string.IsNullOrEmpty(displayName) ? null : displayName;
         Check(await users.UpdateAsync(user));
     }
@@ -34,9 +36,9 @@ public static class Profile
         if (data is null) { user.Avatar = null; user.AvatarType = null; }
         else
         {
-            if (data.Length is 0 or > MaxAvatarBytes) throw new ArgumentException("La foto deve pesare al massimo 256 KB.");
+            if (data.Length is 0 or > MaxAvatarBytes) throw new ArgumentException(T("profile.photoSize"));
             // Il tipo dichiarato non basta: si guardano i primi byte (niente SVG o HTML mascherati da immagine).
-            user.AvatarType = SniffImage(data) ?? throw new ArgumentException("Formato non supportato: usa PNG, JPEG o WebP.");
+            user.AvatarType = SniffImage(data) ?? throw new ArgumentException(T("profile.photoFormat"));
             user.Avatar = data;
         }
         Check(await users.UpdateAsync(user));
@@ -50,12 +52,11 @@ public static class Profile
 
     public static async Task SendConfirmationAsync(UserManager<AppUser> users, Mailer mailer, AppUser user, Uri baseUri, CancellationToken ct = default)
     {
-        if (!mailer.Configured) throw new InvalidOperationException("Invio email non configurato sul server.");
+        if (!mailer.Configured) throw new InvalidOperationException(T("profile.noMailer"));
         if (user.EmailConfirmed) return;
         var token = await users.GenerateEmailConfirmationTokenAsync(user);
         var link = new Uri(baseUri, $"account/confirm-email?user={Uri.EscapeDataString(user.UserName!)}&token={Uri.EscapeDataString(token)}");
-        await mailer.SendAsync(user.Email!, "Conferma la tua email su AgentWeb",
-            $"Per confermare l'indirizzo {user.Email} apri questo link:\n\n{link}\n\nSe non sei stato tu, ignora questo messaggio.", ct);
+        await mailer.SendAsync(user.Email!, T("profile.confirmSubject"), T("profile.confirmBody", user.Email, link), ct);
     }
 
     public static async Task RemoveLoginAsync(UserManager<AppUser> users, AppUser user, string provider)
@@ -102,7 +103,7 @@ public static class Profile
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or FormatException) { return Results.Text(ex.Message, statusCode: 400); }
     }
 
-    static byte[] Base64(string s) => s.Length > MaxAvatarBytes * 4 / 3 + 4 ? throw new ArgumentException("La foto deve pesare al massimo 256 KB.") : Convert.FromBase64String(s);
+    static byte[] Base64(string s) => s.Length > MaxAvatarBytes * 4 / 3 + 4 ? throw new ArgumentException(T("profile.photoSize")) : Convert.FromBase64String(s);
 
     internal static Uri BaseUri(HttpContext http) => new($"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}/");
 }
@@ -124,9 +125,10 @@ public sealed class Mailer(IConfiguration config)
 // Accesso con Google / GitHub (OAuth 2.0 con PKCE). Si attiva solo il provider configurato:
 //   Auth:Google:ClientId / ClientSecret   (redirect URI da registrare: https://<dominio>/signin-google)
 //   Auth:GitHub:ClientId / ClientSecret   (callback URL: https://<dominio>/signin-github)
+//   Auth:Apple:ClientId (Services ID) / TeamId / KeyId / PrivateKey (contenuto del .p8)   (return URL: https://<dominio>/signin-apple)
 public static class ExternalProviders
 {
-    public static readonly string[] Names = ["Google", "GitHub"];
+    public static readonly string[] Names = ["Google", "GitHub", "Apple"];
 
     public static void AddExternalProviders(this WebApplicationBuilder builder)
     {
@@ -135,6 +137,50 @@ public static class ExternalProviders
             "https://openidconnect.googleapis.com/v1/userinfo", ["openid", "email", "profile"], id: "sub", nameKey: "name");
         Add(auth, builder.Configuration, "GitHub", "https://github.com/login/oauth/authorize", "https://github.com/login/oauth/access_token",
             "https://api.github.com/user", ["read:user", "user:email"], id: "id", nameKey: "login");
+        AddApple(auth, builder.Configuration);
+    }
+
+    // Apple: OpenID Connect con risposta in POST (form_post) e niente userinfo; l'identità (sub, email) è nell'id_token.
+    static void AddApple(AuthenticationBuilder auth, IConfiguration config)
+    {
+        if (config["Auth:Apple:ClientId"] is not { Length: > 0 } clientId) return;
+        string teamId = config["Auth:Apple:TeamId"] ?? "", keyId = config["Auth:Apple:KeyId"] ?? "", key = config["Auth:Apple:PrivateKey"] ?? "";
+        if (teamId.Length == 0 || keyId.Length == 0 || key.Length == 0)
+            throw new InvalidOperationException(T("profile.appleConfig"));
+        auth.AddOpenIdConnect("Apple", "Apple", o =>
+        {
+            o.SignInScheme = IdentityConstants.ExternalScheme;
+            o.Authority = "https://appleid.apple.com";
+            o.ClientId = clientId;
+            o.CallbackPath = "/signin-apple";
+            o.ResponseType = "code";
+            o.ResponseMode = "form_post"; // obbligatorio per Apple quando si chiede l'email
+            o.UsePkce = false; // shortcut: Apple non documenta il code_verifier; bastano client secret, state e nonce
+            o.GetClaimsFromUserInfoEndpoint = false;
+            o.Scope.Clear();
+            o.Scope.Add("openid");
+            o.Scope.Add("email");
+            o.Events.OnAuthorizationCodeReceived = ctx =>
+            {
+                ctx.TokenEndpointRequest!.ClientSecret = AppleClientSecret(clientId, teamId, keyId, key, DateTime.UtcNow);
+                return Task.CompletedTask;
+            };
+        });
+    }
+
+    // Il client secret di Apple è un JWT ES256 firmato con la chiave .p8; lo rigeneriamo a ogni login (scade dopo 5 minuti).
+    public static string AppleClientSecret(string clientId, string teamId, string keyId, string pem, DateTime now)
+    {
+        using var ec = System.Security.Cryptography.ECDsa.Create();
+        ec.ImportFromPem(pem.Replace("\\n", "\n")); // nelle variabili d'ambiente gli a capo arrivano spesso come \n
+        var signing = new Microsoft.IdentityModel.Tokens.SigningCredentials(
+            new Microsoft.IdentityModel.Tokens.ECDsaSecurityKey(ec) { KeyId = keyId }, Microsoft.IdentityModel.Tokens.SecurityAlgorithms.EcdsaSha256)
+            { CryptoProviderFactory = new() { CacheSignatureProviders = false } }; // la chiave viene liberata a fine metodo
+        return new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().CreateToken(new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
+        {
+            Issuer = teamId, Audience = "https://appleid.apple.com", IssuedAt = now, NotBefore = now, Expires = now.AddMinutes(5),
+            Claims = new Dictionary<string, object> { ["sub"] = clientId }, SigningCredentials = signing,
+        });
     }
 
     static void Add(AuthenticationBuilder auth, IConfiguration config, string name, string authorize, string token, string userInfo, string[] scopes, string id, string nameKey)
@@ -193,7 +239,7 @@ public static class ExternalProviders
             var current = link ? await users.GetUserAsync(u) : null;
             var info = await signIn.GetExternalLoginInfoAsync(current?.Id); // userId: protegge il collegamento da un CSRF
             await http.SignOutAsync(IdentityConstants.ExternalScheme);
-            if (info is null) return Results.Redirect(link ? "/account?login=failed" : "/login?error=" + Uri.EscapeDataString("Accesso esterno non riuscito."));
+            if (info is null) return Results.Redirect(link ? "/account?login=failed" : "/login?error=" + Uri.EscapeDataString(T("external.failed")));
 
             if (link)
             {
@@ -206,11 +252,11 @@ public static class ExternalProviders
 
             var user = await users.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
             if (user is null)
-                return Results.Redirect("/login?error=" + Uri.EscapeDataString($"Nessun account collegato a questo account {info.LoginProvider}: entra con email e password e collegalo da Impostazioni → Account."));
+                return Results.Redirect("/login?error=" + Uri.EscapeDataString(T("external.notLinked", info.LoginProvider)));
             // Con la verifica in due passaggi attiva il provider esterno non basta: serve il codice, quindi il login con password.
             if (await users.GetTwoFactorEnabledAsync(user))
-                return Results.Redirect("/login?error=" + Uri.EscapeDataString("Il tuo account ha la verifica in due passaggi: entra con email, password e codice."));
-            if (await users.IsLockedOutAsync(user)) return Results.Redirect("/login?error=" + Uri.EscapeDataString("Account bloccato: riprova più tardi."));
+                return Results.Redirect("/login?error=" + Uri.EscapeDataString(T("external.needs2fa")));
+            if (await users.IsLockedOutAsync(user)) return Results.Redirect("/login?error=" + Uri.EscapeDataString(T("auth.locked")));
             await AccountEndpoints.SignInWebAsync(user, signIn, sessions, http);
             return Results.LocalRedirect("~/");
         }).AllowAnonymous();

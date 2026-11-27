@@ -10,30 +10,30 @@
     @if (notice is { } n) { <div class="alert @(n.Ok ? "alert-success" : "alert-danger") py-2" role="status">@n.Text</div> }
     @if (profile is null)
     {
-        <p class="text-muted">@(loadError ?? "Caricamento…")</p>
+        <p class="text-muted">@(loadError ?? T("common.loading"))</p>
     }
     else
     {
         <div class="card-block">
             <div class="profile">
-                @if (profile.Avatar is { } src) { <img class="profile-photo" src="@src" alt="Foto profilo" /> }
+                @if (profile.Avatar is { } src) { <img class="profile-photo" src="@src" alt="@T("account.photo")" /> }
                 else { <span class="avatar profile-avatar" style="@AvatarColor.Style(profile.UserName)" aria-hidden="true">@Initials(profile.UserName)</span> }
                 <div class="profile-id">
                     <div class="profile-name">@(profile.DisplayName ?? Handle(profile.UserName))</div>
                     <div class="profile-handle">@@@Handle(profile.UserName)</div>
                     <div class="d-flex gap-2 mt-2 flex-wrap">
                         <label class="btn btn-sm btn-outline-secondary mb-0">
-                            Cambia foto
+                            @T("account.changePhoto")
                             <InputFile class="visually-hidden" accept="image/png,image/jpeg,image/webp" OnChange="UploadAsync" />
                         </label>
-                        @if (profile.Avatar is not null) { <button class="btn btn-sm btn-link text-danger" @onclick="RemovePhotoAsync">Rimuovi</button> }
+                        @if (profile.Avatar is not null) { <button class="btn btn-sm btn-link text-danger" @onclick="RemovePhotoAsync">@T("account.remove")</button> }
                     </div>
                 </div>
             </div>
 
             <form @onsubmit="SaveAsync" class="d-flex flex-column gap-3">
                 <div>
-                    <label class="form-label" for="display-name">Nome visualizzato</label>
+                    <label class="form-label" for="display-name">@T("account.displayName")</label>
                     <input class="form-control" id="display-name" maxlength="60" @bind="displayName" @bind:event="oninput" placeholder="@Handle(profile.UserName)" />
                 </div>
                 <div>
@@ -42,29 +42,29 @@
                         <span class="input-group-text">@@</span>
                         <input class="form-control" id="username" value="@Handle(profile.UserName)" readonly aria-describedby="username-help" />
                     </div>
-                    <div class="form-text" id="username-help">Viene dall'email e serve per le @@menzioni: non si cambia.</div>
+                    <div class="form-text" id="username-help">@T("account.usernameHelp")</div>
                 </div>
                 <div>
                     <div class="form-label">Email</div>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
                         <span class="profile-email">@profile.UserName</span>
-                        @if (profile.EmailConfirmed) { <span class="badge-verified">✓ Verificata</span> }
+                        @if (profile.EmailConfirmed) { <span class="badge-verified">✓ @T("account.verified")</span> }
                         else
                         {
-                            <span class="badge-unverified">Non verificata</span>
-                            @if (profile.CanSendEmail) { <button type="button" class="btn btn-sm btn-link" @onclick="SendConfirmationAsync">Invia email di conferma</button> }
+                            <span class="badge-unverified">@T("account.unverified")</span>
+                            @if (profile.CanSendEmail) { <button type="button" class="btn btn-sm btn-link" @onclick="SendConfirmationAsync">@T("account.sendConfirmation")</button> }
                         }
                     </div>
                 </div>
-                <div><button class="btn btn-primary" type="submit" disabled="@(!ProfileChanged)">Salva profilo</button></div>
+                <div><button class="btn btn-primary" type="submit" disabled="@(!ProfileChanged)">@T("account.saveProfile")</button></div>
             </form>
         </div>
 
-        <h3 class="section-label">Account collegati</h3>
+        <h3 class="section-label">@T("account.linked")</h3>
         <div class="card-block p-0">
             @if (profile.Providers.Count == 0)
             {
-                <p class="text-muted m-0 p-3">Nessun accesso esterno configurato sul server. Un amministratore può attivare Google e GitHub (<code>Auth:Google:ClientId</code>, <code>Auth:GitHub:ClientId</code>).</p>
+                <p class="text-muted m-0 p-3">@T("account.noProviders") (<code>Auth:Google:ClientId</code>, <code>Auth:GitHub:ClientId</code>, <code>Auth:Apple:ClientId</code>).</p>
             }
             @foreach (var p in profile.Providers)
             {
@@ -73,24 +73,24 @@
                     <span class="linked-icon" aria-hidden="true">@((MarkupString)Icon(p))</span>
                     <div class="linked-body">
                         <strong>@p</strong>
-                        <div class="text-muted small">@(linked is null ? "Non collegato" : $"Collegato come {linked.Account ?? p}")</div>
+                        <div class="text-muted small">@(linked is null ? T("account.notLinked") : T("account.linkedAs", linked.Account ?? p))</div>
                     </div>
-                    @if (linked is not null) { <button class="btn btn-outline-secondary" @onclick="() => DisconnectAsync(p)">Scollega</button> }
-                    else if (InBrowser) { <a class="btn btn-outline-secondary" href="@($"account/external/{p}?mode=link")" data-enhance-nav="false">Collega</a> }
-                    else { <span class="text-muted small">Collegalo dal browser</span> }
+                    @if (linked is not null) { <button class="btn btn-outline-secondary" @onclick="() => DisconnectAsync(p)">@T("account.unlink")</button> }
+                    else if (InBrowser) { <a class="btn btn-outline-secondary" href="@($"account/external/{p}?mode=link")" data-enhance-nav="false">@T("account.link")</a> }
+                    else { <span class="text-muted small">@T("account.linkFromBrowser")</span> }
                 </div>
             }
         </div>
 
         <h3 class="section-label">Password</h3>
         <div class="card-block">
-            <p class="text-muted">Gli altri browser e app dovranno accedere di nuovo; i token MCP restano validi.</p>
+            <p class="text-muted">@T("account.passwordIntro")</p>
             <form @onsubmit="ChangePasswordAsync" class="d-flex flex-column gap-2" style="max-width: 420px">
-                <input class="form-control" type="password" autocomplete="current-password" @bind="currentPassword" @bind:event="oninput" placeholder="Password attuale" aria-label="Password attuale" />
-                <input class="form-control" type="password" autocomplete="new-password" @bind="newPassword" @bind:event="oninput" placeholder="Nuova password" aria-label="Nuova password" />
-                <input class="form-control" type="password" autocomplete="new-password" @bind="confirmPassword" @bind:event="oninput" placeholder="Ripeti la nuova password" aria-label="Ripeti la nuova password" />
-                <div class="form-text">Almeno 6 caratteri con maiuscola, minuscola, numero e simbolo.</div>
-                <div><button class="btn btn-primary" type="submit" disabled="@(busy || currentPassword.Length == 0 || newPassword.Length == 0)">@(busy ? "Cambio in corso…" : "Cambia password")</button></div>
+                <input class="form-control" type="password" autocomplete="current-password" @bind="currentPassword" @bind:event="oninput" placeholder="@T("account.currentPassword")" aria-label="@T("account.currentPassword")" />
+                <input class="form-control" type="password" autocomplete="new-password" @bind="newPassword" @bind:event="oninput" placeholder="@T("account.newPassword")" aria-label="@T("account.newPassword")" />
+                <input class="form-control" type="password" autocomplete="new-password" @bind="confirmPassword" @bind:event="oninput" placeholder="@T("account.repeatPassword")" aria-label="@T("account.repeatPassword")" />
+                <div class="form-text">@T("account.passwordRules")</div>
+                <div><button class="btn btn-primary" type="submit" disabled="@(busy || currentPassword.Length == 0 || newPassword.Length == 0)">@T(busy ? "account.changing" : "account.changePassword")</button></div>
                 @* L'esito qui, accanto al modulo: l'avviso in cima alla pagina non si vede da quaggiù. *@
                 @if (passwordNotice is { } pn) { <div class="alert @(pn.Ok ? "alert-success" : "alert-danger") py-2 mb-0" role="status">@pn.Text</div> }
             </form>
@@ -98,10 +98,10 @@
 
         <div class="card-block card-row">
             <div>
-                <h4>Esci</h4>
-                <p class="text-muted mb-0">Chiude la sessione di questo dispositivo. Le altre si gestiscono da <a href="devices">Sicurezza e dispositivi</a>.</p>
+                <h4>@T("nav.signOut")</h4>
+                <p class="text-muted mb-0">@T("account.signOutText") <a href="devices">@T("settings.devices")</a>.</p>
             </div>
-            <button class="btn btn-outline-danger" @onclick="Session.LogoutAsync">Esci</button>
+            <button class="btn btn-outline-danger" @onclick="Session.LogoutAsync">@T("nav.signOut")</button>
         </div>
     }
 </SettingsShell>
@@ -123,11 +123,11 @@
         await Session.InitializeAsync();
         notice = new Uri(Nav.Uri).Query switch
         {
-            var q when q.Contains("email=confirmed") => (true, "Email verificata."),
-            var q when q.Contains("email=invalid") => (false, "Link di conferma non valido o scaduto."),
-            var q when q.Contains("login=linked") => (true, "Account collegato."),
-            var q when q.Contains("login=taken") => (false, "Quell'account è già collegato a un altro utente."),
-            var q when q.Contains("login=failed") => (false, "Collegamento non riuscito."),
+            var q when q.Contains("email=confirmed") => (true, T("account.emailConfirmed")),
+            var q when q.Contains("email=invalid") => (false, T("account.emailInvalid")),
+            var q when q.Contains("login=linked") => (true, T("account.loginLinked")),
+            var q when q.Contains("login=taken") => (false, T("account.loginTaken")),
+            var q when q.Contains("login=failed") => (false, T("account.loginFailed")),
             _ => null,
         };
         await LoadAsync();
@@ -139,17 +139,17 @@
         catch (Exception ex) { loadError = ex.GetBaseException().Message; }
     }
 
-    Task SaveAsync() => Act(() => Accounts.SaveProfileAsync(displayName), "Profilo salvato.");
-    Task RemovePhotoAsync() => Act(() => Accounts.SetAvatarAsync(null, null), "Foto rimossa.");
-    Task DisconnectAsync(string p) => Act(() => Accounts.RemoveLoginAsync(p), $"{p} scollegato.");
-    Task SendConfirmationAsync() => Act(Accounts.SendConfirmationEmailAsync, $"Ti abbiamo scritto a {profile?.UserName}: apri il link per confermare.");
+    Task SaveAsync() => Act(() => Accounts.SaveProfileAsync(displayName), T("account.saved"));
+    Task RemovePhotoAsync() => Act(() => Accounts.SetAvatarAsync(null, null), T("account.photoRemoved"));
+    Task DisconnectAsync(string p) => Act(() => Accounts.RemoveLoginAsync(p), T("account.unlinked", p));
+    Task SendConfirmationAsync() => Act(Accounts.SendConfirmationEmailAsync, T("account.confirmationSent", profile?.UserName));
 
     async Task UploadAsync(InputFileChangeEventArgs e)
     {
-        if (e.File.Size > 256 * 1024) { notice = (false, "La foto deve pesare al massimo 256 KB."); return; }
+        if (e.File.Size > 256 * 1024) { notice = (false, T("account.photoTooBig")); return; }
         using var ms = new MemoryStream();
         await e.File.OpenReadStream(256 * 1024).CopyToAsync(ms);
-        await Act(() => Accounts.SetAvatarAsync(e.File.ContentType, ms.ToArray()), "Foto aggiornata.");
+        await Act(() => Accounts.SetAvatarAsync(e.File.ContentType, ms.ToArray()), T("account.photoUpdated"));
     }
 
     async Task Act(Func<Task> action, string done)
@@ -161,12 +161,12 @@
 
     async Task ChangePasswordAsync()
     {
-        if (newPassword != confirmPassword) { passwordNotice = (false, "Le due password nuove non coincidono."); return; }
+        if (newPassword != confirmPassword) { passwordNotice = (false, T("account.mismatch")); return; }
         busy = true; passwordNotice = null;
         try
         {
             await Accounts.ChangePasswordAsync(currentPassword, newPassword);
-            passwordNotice = (true, "Password cambiata. Le altre sessioni sono state chiuse.");
+            passwordNotice = (true, T("account.passwordChanged"));
             currentPassword = newPassword = confirmPassword = "";
         }
         catch (Exception ex) { passwordNotice = (false, ex.GetBaseException().Message); }
@@ -185,6 +185,7 @@
     {
         "Google" => """<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.6 12.2c0-.8-.1-1.5-.2-2.2H12v4.2h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-1.9 3.3-4.8 3.3-8Z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.6-2.7c-1 .7-2.2 1-3.7 1-2.9 0-5.3-1.9-6.2-4.5H2.1v2.8A11 11 0 0 0 12 23Z"/><path fill="#FBBC05" d="M5.8 14.1a6.6 6.6 0 0 1 0-4.2V7.1H2.1a11 11 0 0 0 0 9.8l3.7-2.8Z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.2 1.7l3.2-3.2A11 11 0 0 0 2.1 7.1l3.7 2.8C6.7 7.3 9.1 5.4 12 5.4Z"/></svg>""",
         "GitHub" => """<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 1.5a10.5 10.5 0 0 0-3.3 20.5c.5.1.7-.2.7-.5v-1.8c-2.9.6-3.5-1.4-3.5-1.4-.5-1.2-1.2-1.5-1.2-1.5-.9-.7.1-.6.1-.6 1 .1 1.6 1.1 1.6 1.1.9 1.6 2.5 1.1 3.1.9.1-.7.4-1.1.6-1.4-2.3-.3-4.8-1.2-4.8-5.2 0-1.1.4-2 1.1-2.8-.1-.3-.5-1.3.1-2.8 0 0 .9-.3 2.9 1.1a10 10 0 0 1 5.2 0c2-1.4 2.9-1.1 2.9-1.1.6 1.5.2 2.5.1 2.8.7.8 1.1 1.7 1.1 2.8 0 4-2.5 4.9-4.8 5.2.4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10.5 10.5 0 0 0 12 1.5Z"/></svg>""",
+        "Apple" => """<svg viewBox="0 0 24 24"><path fill="currentColor" d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.7-1-2.7-4.1ZM13.9 5c.7-.9 1.2-2 1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.2.1 2.3-.6 3.1-1.5Z"/></svg>""",
         _ => "",
     };
 }

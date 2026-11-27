@@ -30,14 +30,36 @@ public sealed class RemoteUserSession(HttpClient anonymous, ITokenStore store) :
     {
         refresh = await store.GetAsync("refresh");
         UserName = await store.GetAsync("user");
+        // App: la lingua la decide il server. Si usa subito quella salvata e la si aggiorna in background (vale dal prossimo
+        // avvio); si aspetta il server solo al primo avvio, quando non c'è niente di salvato. Una richiesta per sessione.
+        var saved = await store.GetAsync("lang");
+        Lang.Use(saved);
+        languageFetch ??= FetchLanguageAsync(applyNow: saved is null);
+        if (saved is null) await languageFetch;
+    }
+
+    Task? languageFetch;
+
+    async Task FetchLanguageAsync(bool applyNow)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var code = (await anonymous.GetStringAsync("language", cts.Token)).Trim();
+            if (!Lang.All.ContainsKey(code)) return;
+            if (applyNow) Lang.Use(code);
+            await store.SetAsync("lang", code);
+        }
+        catch (HttpRequestException) { } // senza rete resta quella salvata (o l'italiano)
+        catch (OperationCanceledException) { }
     }
 
     public async Task<string?> LoginAsync(string email, string password, string? code = null)
     {
         using var r = await anonymous.PostAsJsonAsync("identity/login", new { email, password, twoFactorCode = code });
         if (r.StatusCode == HttpStatusCode.Unauthorized && (await r.Content.ReadAsStringAsync()).Contains("RequiresTwoFactor"))
-            return string.IsNullOrWhiteSpace(code) ? "Inserisci il codice dell'app di autenticazione." : "Codice di verifica non valido.";
-        if (!r.IsSuccessStatusCode) return r.StatusCode == HttpStatusCode.Unauthorized ? "Email o password errate." : $"Server: HTTP {(int)r.StatusCode}";
+            return Lang.T(string.IsNullOrWhiteSpace(code) ? "auth.enterCode" : "auth.badCode");
+        if (!r.IsSuccessStatusCode) return r.StatusCode == HttpStatusCode.Unauthorized ? Lang.T("auth.badCredentials") : $"Server: HTTP {(int)r.StatusCode}";
         await SaveAsync((await r.Content.ReadFromJsonAsync<TokenResponse>())!, email);
         return null;
     }
@@ -268,7 +290,7 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
         if (Connected)
         {
             var r = await hub!.InvokeAsync<HubWatchReply>("WatchFrom", channelId, afterId);
-            if (r.NotFound) throw new KeyNotFoundException($"Canale {channelId} inesistente.");
+            if (r.NotFound) throw new KeyNotFoundException(Lang.T("nf.channel", channelId));
             return r.Replay;
         }
         return channelId is { } id && afterId >= 0 ? await GetMessagesSinceAsync(id, afterId) : null;
@@ -316,7 +338,7 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
         if (Connected)
         {
             var r = await hub!.InvokeAsync<HubSendReply>("Reply", channelId, parentId, text, clientId);
-            if (r.NotFound) throw new KeyNotFoundException($"Canale {channelId} inesistente.");
+            if (r.NotFound) throw new KeyNotFoundException(Lang.T("nf.channel", channelId));
             if (r.Error is { } e) throw new InvalidOperationException(e);
             return;
         }
@@ -325,11 +347,19 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
     public Task MarkReadAsync(int channelId, long lastId) => PostAsync<object?>($"api/workspace/channels/{channelId}/read", new MarkReadRequest(lastId));
     public async Task<string> WhoAmIAsync() => (await GetAsync<AccountInfo>("api/account/me")).UserName;
     public Task<ActivityDto> GetActivityAsync() => GetAsync<ActivityDto>("api/workspace/activity");
+    public Task<StatsDto> GetStatsAsync(int days) => GetAsync<StatsDto>($"api/workspace/stats?days={days}");
+    public Task<AgentLogDto> GetAgentLogAsync(string agent, int days) => GetAsync<AgentLogDto>($"api/workspace/agents/{Uri.EscapeDataString(agent)}/log?days={days}");
     public Task<List<FeedItemDto>> GetFeedAsync() => GetAsync<List<FeedItemDto>>("api/workspace/feed");
     public Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId) => GetAsync<List<MessageDto>>($"api/workspace/channels/{channelId}/messages/{rootId}/thread");
     public Task MarkThreadReadAsync(int channelId, long rootId, long lastId) =>
         PostAsync<object?>($"api/workspace/channels/{channelId}/threads/{rootId}/read", new MarkReadRequest(lastId));
     public Task<List<SearchHitDto>> SearchAsync(string query) => GetAsync<List<SearchHitDto>>($"api/workspace/search?q={Uri.EscapeDataString(query)}");
+    public Task<ChannelNotifyDto> GetChannelNotifyAsync(int channelId) => GetAsync<ChannelNotifyDto>($"api/workspace/channels/{channelId}/notifications");
+    public async Task SetChannelNotifyAsync(int channelId, string level)
+    {
+        using var r = await http.PutAsJsonAsync($"api/workspace/channels/{channelId}/notifications", new ChannelNotifyDto(level));
+        await RemoteAgentSettingsService.EnsureOkAsync(r, default);
+    }
     public Task<ChannelDto> OpenDirectAsync(string with) => PostAsync<ChannelDto>("api/workspace/direct", new { name = with });
     public Task<List<string>> GetPeopleAsync() => GetAsync<List<string>>("api/workspace/people");
     public Task<List<TaskDto>> GetAllTasksAsync() => GetAsync<List<TaskDto>>("api/workspace/tasks");

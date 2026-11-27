@@ -17,3 +17,4 @@ agentsettings.json
 vapid-keys.json
 # Icone degli agenti generate dal server (cache)
 agent-icons/
+agentfiles/

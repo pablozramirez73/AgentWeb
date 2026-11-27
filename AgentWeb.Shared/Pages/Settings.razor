@@ -2,11 +2,11 @@
 @rendermode InteractiveServer
 @inject IAgentSettingsService Store
 
-<PageTitle>Agenti · AgentWeb</PageTitle>
+<PageTitle>@T("settings.agents") · AgentWeb</PageTitle>
 
-<SettingsShell Title="Agenti">
+<SettingsShell Title="@T("settings.agents")">
 <div class="page-header">
-<p>Gli agenti sono i membri AI dei canali: rispondono alle @@menzioni, svolgono i task e collaborano tra loro (chi coordina un task può chiedere aiuto agli altri). Ognuno ha il suo LLM. Solo gli amministratori possono modificarli; le modifiche valgono dopo il salvataggio.</p>
+<p>@T("agents.intro")</p>
 </div>
 
 @foreach (var l in settings.LocalAgents)
@@ -14,18 +14,18 @@
     var llm = l.Llm;
     <div class="card mb-3"><div class="card-body">
         <div class="row g-2">
-            <div class="col-md-4"><label class="form-label">Nome</label><input class="form-control" @bind="l.Name" placeholder="Ricercatore" />
-                <div class="form-text">Si @@menziona così nei canali (lettere, numeri, _ e -).</div></div>
-            <div class="col-md-8"><label class="form-label">Scopo</label>
-                <textarea class="form-control" rows="3" @bind="l.Prompt" placeholder="Cosa fa questo agente, come deve rispondere, in che lingua…"></textarea></div>
-            <div class="col-md-4"><label class="form-label">Protocollo</label>
+            <div class="col-md-4"><label class="form-label">@T("agents.name")</label><input class="form-control" @bind="l.Name" placeholder="@T("agents.name.placeholder")" />
+                <div class="form-text">@T("agents.name.help")</div></div>
+            <div class="col-md-8"><label class="form-label">@T("agents.purpose")</label>
+                <textarea class="form-control" rows="3" @bind="l.Prompt" placeholder="@T("agents.purpose.placeholder")"></textarea></div>
+            <div class="col-md-4"><label class="form-label">@T("agents.protocol")</label>
                 <select class="form-select" @bind="l.Protocol">
                     @foreach (var p in AgentProtocols.All) { <option value="@p.Value">@p.Label</option> }
                 </select>
                 <div class="form-text">@AgentProtocols.All.First(p => p.Value == l.Protocol).Help</div></div>
         </div>
 
-        <h6 class="mt-3 mb-2">Strumenti</h6>
+        <h6 class="mt-3 mb-2">@T("agents.tools")</h6>
         <div class="tool-grid">
             @foreach (var t in AgentTools.Native)
             {
@@ -37,37 +37,51 @@
             @foreach (var m in settings.McpServers)
             {
                 var id = AgentTools.McpPrefix + m.Name;
-                <label class="tool" title="Strumenti del server MCP @m.Name">
+                <label class="tool" title="@T("agents.mcpTools", m.Name)">
                     <input type="checkbox" class="form-check-input" checked="@l.Can(id)" @onchange="e => Toggle(l, id, (bool)e.Value!)" />
                     <span><strong>MCP · @m.Name</strong><small>@(m.Transport == "stdio" ? m.Command : m.Url)</small></span>
                 </label>
             }
         </div>
 
+        <h6 class="mt-3 mb-1">@T("agents.files")</h6>
+        <div class="form-text mb-2">@T("agents.files.help") @(allowExecute ? "" : T("agents.files.noExecute"))</div>
+        @foreach (var r in l.Files)
+        {
+            <div class="d-flex gap-3 align-items-center mb-2 flex-wrap">
+                <input class="form-control form-control-sm" style="max-width:22rem" @bind="r.Path" placeholder="docs/**" aria-label="@T("agents.files.path")" />
+                <label class="form-check mb-0"><input type="checkbox" class="form-check-input" @bind="r.Read" /> @T("agents.files.read")</label>
+                <label class="form-check mb-0"><input type="checkbox" class="form-check-input" @bind="r.Write" /> @T("agents.files.write")</label>
+                <label class="form-check mb-0"><input type="checkbox" class="form-check-input" @bind="r.Execute" disabled="@(!allowExecute && !r.Execute)" /> @T("agents.files.execute")</label>
+                <button class="btn btn-sm btn-link text-danger" @onclick="() => l.Files.Remove(r)">@T("account.remove")</button>
+            </div>
+        }
+        <button class="btn btn-sm btn-outline-secondary" @onclick="() => l.Files.Add(new() { Read = true })">+ @T("agents.files.add")</button>
+
         <h6 class="mt-3 mb-2">LLM</h6>
         <div class="row g-2">
-            <div class="col-md-4"><label class="form-label">Tipo</label>
+            <div class="col-md-4"><label class="form-label">@T("agents.kind")</label>
                 <select class="form-select" value="@llm.Kind" @onchange="e => ChangeKind(llm, (string)e.Value!)">
                     @foreach (var k in LlmKinds.All) { <option value="@k.Kind">@k.Label</option> }
                 </select></div>
             @if (llm.Kind == LlmKinds.Daemon)
             {
-                <div class="col-md-8"><label class="form-label">Utente del computer (email)</label>
-                    <input class="form-control" type="email" @bind="llm.Url" placeholder="alice@esempio.it" />
-                    <small class="text-muted">Sul suo computer: <code>agentweb daemon --runtime claude="claude -p"</code>. Riceve solo il lavoro dei canali che vede.</small></div>
+                <div class="col-md-8"><label class="form-label">@T("agents.daemonUser")</label>
+                    <input class="form-control" type="email" @bind="llm.Url" placeholder="alice@example.com" />
+                    <small class="text-muted">@T("agents.onTheirComputer") <code>agentweb daemon --runtime claude="claude -p"</code>. @T("agents.daemonScope")</small></div>
             }
             else
             {
                 <div class="col-md-8"><label class="form-label">URL</label><input class="form-control" @bind="llm.Url" /></div>
-                <div class="col-md-6"><label class="form-label">Token API @(LlmKinds.All.First(k => k.Kind == llm.Kind).NeedsKey ? "" : "(facoltativo)")</label>
+                <div class="col-md-6"><label class="form-label">@T("agents.apiToken") @(LlmKinds.All.First(k => k.Kind == llm.Kind).NeedsKey ? "" : T("agents.optional"))</label>
                     <input class="form-control" type="password" autocomplete="off" @bind="llm.ApiKey" /></div>
             }
-            <div class="col-md-6"><label class="form-label">@(llm.Kind == LlmKinds.Daemon ? "Runtime" : "Modello")</label>
+            <div class="col-md-6"><label class="form-label">@(llm.Kind == LlmKinds.Daemon ? "Runtime" : T("stats.model"))</label>
                 <div class="input-group">
                     @if (models.GetValueOrDefault(llm) is { Count: > 0 } list)
                     {
                         <select class="form-select" @bind="llm.DefaultModel">
-                            @if (!list.Contains(llm.DefaultModel)) { <option value="@llm.DefaultModel">@(llm.DefaultModel is { Length: > 0 } ? llm.DefaultModel : "(scegli)")</option> }
+                            @if (!list.Contains(llm.DefaultModel)) { <option value="@llm.DefaultModel">@(llm.DefaultModel is { Length: > 0 } ? llm.DefaultModel : T("agents.choose"))</option> }
                             @foreach (var m in list) { <option value="@m">@m</option> }
                         </select>
                     }
@@ -75,70 +89,70 @@
                     {
                         <input class="form-control" @bind="llm.DefaultModel" placeholder="@ModelHint(llm.Kind)" />
                     }
-                    <button class="btn btn-outline-secondary" type="button" disabled="@busy" @onclick="() => LoadModelsAsync(llm)">Carica modelli</button>
+                    <button class="btn btn-outline-secondary" type="button" disabled="@busy" @onclick="() => LoadModelsAsync(llm)">@T("agents.loadModels")</button>
                 </div></div>
         </div>
         <div class="d-flex gap-2 align-items-center mt-3 flex-wrap">
-            <div class="form-check me-2"><input class="form-check-input" type="checkbox" id="local-@l.GetHashCode()" @bind="l.Enabled" /><label class="form-check-label" for="local-@l.GetHashCode()">Abilitato</label></div>
-            <button class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => TestAsync(llm, () => Store.TestLlmAsync(llm), 120)">Prova l'LLM</button>
-            <button class="btn btn-sm btn-outline-danger" @onclick="() => { settings.LocalAgents.Remove(l); results.Remove(llm); }">Rimuovi</button>
+            <div class="form-check me-2"><input class="form-check-input" type="checkbox" id="local-@l.GetHashCode()" @bind="l.Enabled" /><label class="form-check-label" for="local-@l.GetHashCode()">@T("agents.enabled")</label></div>
+            <button class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => TestAsync(llm, () => Store.TestLlmAsync(llm), 120)">@T("agents.testLlm")</button>
+            <button class="btn btn-sm btn-outline-danger" @onclick="() => { settings.LocalAgents.Remove(l); results.Remove(llm); }">@T("account.remove")</button>
             <ResultText Result="@results.GetValueOrDefault(llm)" />
         </div>
     </div></div>
 }
-<button class="btn btn-outline-secondary" @onclick="AddAgent">+ Agente</button>
+<button class="btn btn-outline-secondary" @onclick="AddAgent">+ @T("field.agent")</button>
 
-<h4 class="mt-4">Server MCP</h4>
+<h4 class="mt-4">@T("agents.mcpServers")</h4>
 @foreach (var s in settings.McpServers)
 {
     <div class="card mb-3"><div class="card-body">
         <div class="row g-2">
-            <div class="col-md-3"><label class="form-label">Nome</label><input class="form-control" @bind="s.Name" /></div>
-            <div class="col-md-2"><label class="form-label">Trasporto</label>
+            <div class="col-md-3"><label class="form-label">@T("agents.name")</label><input class="form-control" @bind="s.Name" /></div>
+            <div class="col-md-2"><label class="form-label">@T("agents.transport")</label>
                 <select class="form-select" @bind="s.Transport">
                     <option value="http">HTTP (Streamable)</option>
-                    <option value="stdio" disabled="@(!allowStdio)">stdio (solo Development)</option>
+                    <option value="stdio" disabled="@(!allowStdio)">@T("agents.stdioDev")</option>
                 </select></div>
             @if (s.Transport == "stdio")
             {
-                <div class="col-md-3"><label class="form-label">Comando</label><input class="form-control" @bind="s.Command" placeholder="npx" /></div>
-                <div class="col-md-4"><label class="form-label">Argomenti</label><input class="form-control" @bind="s.Arguments" placeholder="-y @@modelcontextprotocol/server-everything" /></div>
+                <div class="col-md-3"><label class="form-label">@T("agents.command")</label><input class="form-control" @bind="s.Command" placeholder="npx" /></div>
+                <div class="col-md-4"><label class="form-label">@T("agents.arguments")</label><input class="form-control" @bind="s.Arguments" placeholder="-y @@modelcontextprotocol/server-everything" /></div>
             }
             else
             {
                 <div class="col-md-7"><label class="form-label">URL</label><input class="form-control" @bind="s.Url" placeholder="https://server/mcp" /></div>
-                <div class="col-12"><label class="form-label">Header (uno per riga, Chiave: Valore)</label>
+                <div class="col-12"><label class="form-label">@T("agents.headers")</label>
                     <textarea class="form-control font-monospace" rows="2" @bind="s.Headers" placeholder="Authorization: Bearer ..."></textarea></div>
             }
         </div>
         <div class="d-flex gap-2 align-items-center mt-2">
-            <div class="form-check me-2"><input class="form-check-input" type="checkbox" id="mcp-@s.GetHashCode()" @bind="s.Enabled" /><label class="form-check-label" for="mcp-@s.GetHashCode()">Abilitato</label></div>
-            <button class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => TestAsync(s, () => Store.TestMcpAsync(s))">Testa</button>
-            <button class="btn btn-sm btn-outline-danger" @onclick="() => { settings.McpServers.Remove(s); results.Remove(s); }">Rimuovi</button>
+            <div class="form-check me-2"><input class="form-check-input" type="checkbox" id="mcp-@s.GetHashCode()" @bind="s.Enabled" /><label class="form-check-label" for="mcp-@s.GetHashCode()">@T("agents.enabled")</label></div>
+            <button class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => TestAsync(s, () => Store.TestMcpAsync(s))">@T("agents.test")</button>
+            <button class="btn btn-sm btn-outline-danger" @onclick="() => { settings.McpServers.Remove(s); results.Remove(s); }">@T("account.remove")</button>
             <ResultText Result="@results.GetValueOrDefault(s)" />
         </div>
     </div></div>
 }
-<button class="btn btn-outline-secondary" @onclick="() => settings.McpServers.Add(new())">+ Server MCP</button>
+<button class="btn btn-outline-secondary" @onclick="() => settings.McpServers.Add(new())">+ @T("agents.mcpServer")</button>
 
-<h4 class="mt-4">Agenti A2A</h4>
+<h4 class="mt-4">@T("agents.a2a")</h4>
 @foreach (var a in settings.A2AAgents)
 {
     <div class="card mb-3"><div class="card-body">
         <div class="row g-2">
-            <div class="col-md-3"><label class="form-label">Nome nel dibattito</label><input class="form-control" @bind="a.Name" /></div>
-            <div class="col-md-5"><label class="form-label">URL base (Agent Card)</label><input class="form-control" @bind="a.Url" placeholder="http://localhost:5048" /></div>
-            <div class="col-md-4"><label class="form-label">Bearer token (opzionale)</label><input class="form-control" type="password" autocomplete="off" @bind="a.BearerToken" /></div>
+            <div class="col-md-3"><label class="form-label">@T("agents.debateName")</label><input class="form-control" @bind="a.Name" /></div>
+            <div class="col-md-5"><label class="form-label">@T("agents.baseUrl")</label><input class="form-control" @bind="a.Url" placeholder="http://localhost:5048" /></div>
+            <div class="col-md-4"><label class="form-label">Bearer token @T("agents.optional")</label><input class="form-control" type="password" autocomplete="off" @bind="a.BearerToken" /></div>
         </div>
         <div class="d-flex gap-2 align-items-center mt-2">
-            <div class="form-check me-2"><input class="form-check-input" type="checkbox" id="a2a-@a.GetHashCode()" @bind="a.Enabled" /><label class="form-check-label" for="a2a-@a.GetHashCode()">Abilitato</label></div>
-            <button class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => TestAsync(a, () => Store.TestA2AAsync(a))">Testa</button>
-            <button class="btn btn-sm btn-outline-danger" @onclick="() => { settings.A2AAgents.Remove(a); results.Remove(a); }">Rimuovi</button>
+            <div class="form-check me-2"><input class="form-check-input" type="checkbox" id="a2a-@a.GetHashCode()" @bind="a.Enabled" /><label class="form-check-label" for="a2a-@a.GetHashCode()">@T("agents.enabled")</label></div>
+            <button class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => TestAsync(a, () => Store.TestA2AAsync(a))">@T("agents.test")</button>
+            <button class="btn btn-sm btn-outline-danger" @onclick="() => { settings.A2AAgents.Remove(a); results.Remove(a); }">@T("account.remove")</button>
             <ResultText Result="@results.GetValueOrDefault(a)" />
         </div>
     </div></div>
 }
-<button class="btn btn-outline-secondary" @onclick="() => settings.A2AAgents.Add(new())">+ Agente A2A</button>
+<button class="btn btn-outline-secondary" @onclick="() => settings.A2AAgents.Add(new())">+ @T("agents.a2aAgent")</button>
 
 <hr />
 @* Sempre visibile (anche sul telefono, con la pagina lunga): esito del salvataggio ed errori accanto al pulsante. *@
@@ -148,10 +162,10 @@
         <ul class="text-danger mb-2" role="alert">@foreach (var e in errors) { <li>@e</li> }</ul>
     }
     <div class="d-flex gap-2 align-items-center">
-        <button class="btn btn-primary" disabled="@busy" @onclick="Save">Salva</button>
-        <button class="btn btn-outline-secondary" @onclick="LoadAsync">Annulla modifiche</button>
-        @if (saved) { <span class="text-success" role="status">Salvato.</span> }
-        else if (errors.Count > 0) { <span class="text-danger">Non salvato.</span> }
+        <button class="btn btn-primary" disabled="@busy" @onclick="Save">@T("common.save")</button>
+        <button class="btn btn-outline-secondary" @onclick="LoadAsync">@T("agents.discard")</button>
+        @if (saved) { <span class="text-success" role="status">@T("agents.saved")</span> }
+        else if (errors.Count > 0) { <span class="text-danger">@T("agents.notSaved")</span> }
     </div>
 </div>
 </SettingsShell>
@@ -160,15 +174,15 @@
     private AgentSettings settings = new();
     private readonly Dictionary<object, (bool Ok, string Text)> results = [];
     private List<string> errors = [];
-    private bool busy, saved, allowStdio;
+    private bool busy, saved, allowStdio, allowExecute;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
         results.Clear(); models.Clear(); errors = []; saved = false;
-        try { (settings, allowStdio) = await Store.GetAsync(); }
-        catch (Exception ex) { errors = [$"Impossibile leggere le impostazioni: {ex.GetBaseException().Message}"]; }
+        try { (settings, allowStdio, allowExecute) = await Store.GetAsync(); }
+        catch (Exception ex) { errors = [T("agents.loadFailed", ex.GetBaseException().Message)]; }
     }
 
     // Cambiando tipo si propone l'URL tipico, solo se quello attuale era il default di un altro tipo (non si perde un URL scritto a mano).
@@ -195,7 +209,7 @@
         var last = settings.LocalAgents.LastOrDefault()?.Llm;
         settings.LocalAgents.Add(new()
         {
-            Name = $"Agente{settings.LocalAgents.Count + 1}",
+            Name = T("field.agent") + (settings.LocalAgents.Count + 1),
             Tools = [.. AgentTools.Defaults], // nuovi agenti: collaborare, leggere il canale, memoria (niente web né MCP finché non li concedi)
             Llm = last is null ? new() : new() { Kind = last.Kind, Url = last.Url, ApiKey = last.ApiKey, DefaultModel = last.DefaultModel },
         });
@@ -205,13 +219,13 @@
     private async Task LoadModelsAsync(LlmProviderConfig llm)
     {
         busy = true;
-        results[llm] = (true, "Carico i modelli…");
+        results[llm] = (true, T("agents.loadingModels"));
         try
         {
             var list = await Store.ListModelsAsync(llm).WaitAsync(TimeSpan.FromSeconds(40));
             models[llm] = list;
             if (list.Count > 0 && !list.Contains(llm.DefaultModel)) llm.DefaultModel = list[0];
-            results[llm] = (list.Count > 0, list.Count > 0 ? $"{list.Count} modelli disponibili." : "Il server non espone modelli.");
+            results[llm] = (list.Count > 0, list.Count > 0 ? T("agents.modelsAvailable", list.Count) : T("agents.noModels"));
         }
         catch (Exception ex) { results[llm] = (false, ex.GetBaseException().Message); }
         finally { busy = false; }
@@ -219,17 +233,17 @@
 
     private static string ModelHint(string kind) => kind switch
     {
-        LlmKinds.OpenAI => "gpt-5-mini, o il nome del modello del server",
+        LlmKinds.OpenAI => T("agents.hint.openai"),
         LlmKinds.Anthropic => "claude-sonnet-5-5",
         LlmKinds.OllamaCloud => "gpt-oss:120b-cloud",
-        LlmKinds.Daemon => "claude (nome del runtime offerto dal daemon)",
+        LlmKinds.Daemon => T("agents.hint.daemon"),
         _ => "gemma4:e4b-mlx",
     };
 
     private async Task TestAsync(object key, Func<Task<string>> test, int seconds = 30)
     {
         busy = true;
-        results[key] = (true, "Test in corso...");
+        results[key] = (true, T("agents.testing"));
         try { results[key] = (true, await test().WaitAsync(TimeSpan.FromSeconds(seconds))); }
         catch (Exception ex) { results[key] = (false, ex.GetBaseException().Message); }
         finally { busy = false; }
@@ -238,7 +252,7 @@
     private async Task Save()
     {
         saved = false;
-        errors = settings.Validate(allowStdio);
+        errors = settings.Validate(allowStdio, allowExecute);
         if (errors.Count > 0) return;
         busy = true;
         try { await Store.SaveAsync(settings); saved = true; }

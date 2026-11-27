@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using static AgentWeb.Shared.Lang;
 
 namespace AgentWeb.Web;
 
@@ -40,7 +41,7 @@ public sealed class SessionStore(IDbContextFactory<AppDb> dbf, SessionConnection
     public async Task<ApiTokenDto> CreateTokenAsync(string userName, string name)
     {
         name = name?.Trim() ?? "";
-        if (name.Length is 0 or > 100) throw new ArgumentException("Nome del token: da 1 a 100 caratteri.");
+        if (name.Length is 0 or > 100) throw new ArgumentException(T("token.nameLength"));
         var secret = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         await using var db = await dbf.CreateDbContextAsync();
         var s = new UserSessionEntity
@@ -98,11 +99,11 @@ public sealed class SessionStore(IDbContextFactory<AppDb> dbf, SessionConnection
         return n > 0;
     }
 
-    // except: la sessione da lasciare aperta; logins = solo web/app (i token MCP restano validi).
-    public async Task<int> RevokeAllAsync(string userName, string? except = null, bool logins = false)
+    // except: la sessione da lasciare aperta. Chiude anche i token (MCP, CLI, daemon): chi ha rubato la password può averne creato uno.
+    public async Task<int> RevokeAllAsync(string userName, string? except = null)
     {
         await using var db = await dbf.CreateDbContextAsync();
-        var ids = await db.UserSessions.Where(s => s.UserName == userName && s.RevokedAt == null && s.Id != except && (!logins || s.Kind != "token"))
+        var ids = await db.UserSessions.Where(s => s.UserName == userName && s.RevokedAt == null && s.Id != except)
             .Select(s => s.Id).ToListAsync();
         await db.UserSessions.Where(s => ids.Contains(s.Id)).ExecuteUpdateAsync(u => u.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
         await db.PushDevices.Where(d => d.Sid != null && ids.Contains(d.Sid)).ExecuteDeleteAsync();
@@ -142,7 +143,7 @@ public static class SessionValidation
             if (ctx.Options.BearerTokenProtector.Unprotect(header["Bearer ".Length..].Trim()) is not { } ticket) return; // token non valido: lo rifiuta il handler
             var sessions = ctx.HttpContext.RequestServices.GetRequiredService<SessionStore>();
             if (!await sessions.IsActiveAsync(ticket.Principal.FindFirstValue(SessionStore.Claim), ticket.Principal.Identity?.Name))
-                ctx.Fail("Sessione revocata o scaduta.");
+                ctx.Fail(T("auth.sessionRevoked"));
         };
     }
 }
@@ -159,8 +160,8 @@ public sealed class ApiTokenAuthenticationHandler(IOptionsMonitor<Authentication
     {
         var header = Request.Headers.Authorization.ToString();
         if (!header.StartsWith("Bearer " + SessionStore.TokenPrefix, StringComparison.Ordinal)) return AuthenticateResult.NoResult();
-        if (await sessions.ValidateTokenAsync(header["Bearer ".Length..].Trim()) is not { } t) return AuthenticateResult.Fail("Token non valido o revocato.");
-        if (await users.FindByNameAsync(t.UserName) is not { } user) return AuthenticateResult.Fail("Utente inesistente.");
+        if (await sessions.ValidateTokenAsync(header["Bearer ".Length..].Trim()) is not { } t) return AuthenticateResult.Fail(T("auth.tokenInvalid"));
+        if (await users.FindByNameAsync(t.UserName) is not { } user) return AuthenticateResult.Fail(T("auth.noUser"));
         var principal = await signIn.CreateUserPrincipalAsync(user);
         ((ClaimsIdentity)principal.Identity!).AddClaim(new(SessionStore.Claim, t.Sid));
         return AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme));
@@ -253,7 +254,7 @@ public static class TwoFactor
         {
             if (await users.FindByNameAsync(u.Identity!.Name!) is not { } user) return Results.Unauthorized();
             if (await users.GetTwoFactorEnabledAsync(user)) return Results.NoContent();
-            if (!await VerifyAsync(users, user, req.Code)) return Results.Text("Codice non valido: controlla l'ora del telefono e riprova.", statusCode: 400);
+            if (!await VerifyAsync(users, user, req.Code)) return Results.Text(T("2fa.badCodeClock"), statusCode: 400);
             await users.SetTwoFactorEnabledAsync(user, true);
             return Results.NoContent();
         }).RequireRateLimiting(SessionEndpoints.AuthRateLimit); // i tentativi sui codici costano come quelli sulle password
@@ -262,7 +263,7 @@ public static class TwoFactor
         {
             if (await users.FindByNameAsync(u.Identity!.Name!) is not { } user) return Results.Unauthorized();
             if (!await users.GetTwoFactorEnabledAsync(user)) return Results.NoContent();
-            if (!await VerifyAsync(users, user, req.Code)) return Results.Text("Codice non valido.", statusCode: 400);
+            if (!await VerifyAsync(users, user, req.Code)) return Results.Text(T("2fa.badCode"), statusCode: 400);
             await users.SetTwoFactorEnabledAsync(user, false);
             await users.ResetAuthenticatorKeyAsync(user); // la prossima attivazione usa una chiave nuova
             return Results.NoContent();
@@ -315,14 +316,14 @@ public static class SessionEndpoints
             await s.RevokeAsync(id, u.Identity!.Name!) ? Results.NoContent() : Results.NotFound());
         mine.MapPost("/revoke-all", async (ClaimsPrincipal u, SessionStore s) => Results.Ok(await s.RevokeAllAsync(u.Identity!.Name!)));
 
-        // Cambio password: serve quella attuale; le altre sessioni web/app si chiudono (chi conosceva la vecchia è fuori).
+        // Cambio password: serve quella attuale; le altre sessioni e i token si chiudono (chi conosceva la vecchia è fuori).
         app.MapPost("/api/account/password", async (ChangePasswordRequest req, ClaimsPrincipal u, UserManager<AppUser> users, SessionStore s) =>
         {
             var user = await users.FindByNameAsync(u.Identity!.Name!);
             if (user is null) return Results.Unauthorized();
             var r = await users.ChangePasswordAsync(user, req.CurrentPassword ?? "", req.NewPassword ?? "");
             if (!r.Succeeded) return Results.Text(string.Join(" ", r.Errors.Select(e => e.Description)), statusCode: 400);
-            await s.RevokeAllAsync(user.UserName!, except: u.FindFirstValue(SessionStore.Claim), logins: true);
+            await s.RevokeAllAsync(user.UserName!, except: u.FindFirstValue(SessionStore.Claim));
             return Results.NoContent();
         }).RequireAuthorization().RequireRateLimiting(AuthRateLimit);
 

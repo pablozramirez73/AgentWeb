@@ -16,6 +16,12 @@ builder.Services.AddScoped<IWorkspaceClient>(sp => new RemoteWorkspaceClient(sp.
 builder.Services.AddScoped<IAccountClient>(sp => new RemoteAccountClient(sp.GetRequiredService<HttpClient>()));
 builder.Services.AddScoped<AgentWeb.Shared.Services.IDevicePush, AgentWeb.Shared.Services.BrowserPush>();
 
+// Lingua dell'installazione: la decide il server.
+using (var probe = new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress), Timeout = TimeSpan.FromSeconds(5) })
+    try { AgentWeb.Shared.Lang.Use(await probe.GetStringAsync("language")); }
+    catch (HttpRequestException) { } // server irraggiungibile: italiano
+    catch (TaskCanceledException) { } // timeout: italiano
+
 await builder.Build().RunAsync();
 
 // Cookie scaduto: le /api rispondono 401 (non un redirect), quindi si ricarica la pagina e il server porta al login.

@@ -5,6 +5,8 @@ using ModelContextProtocol.Client;
 
 using AgentWeb.Shared.Agents;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 public static class AgentConnections
@@ -17,7 +19,7 @@ public static class AgentConnections
         IClientTransport transport;
         if (s.Transport == "stdio")
         {
-            if (!allowStdio) throw new InvalidOperationException("Trasporto stdio consentito solo in Development.");
+            if (!allowStdio) throw new InvalidOperationException(T("conn.stdioDevOnly"));
             transport = new StdioClientTransport(new StdioClientTransportOptions
             {
                 Name = s.Name,
@@ -66,7 +68,7 @@ public static class AgentConnections
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                return (s.Name, Client: (McpClient?)null, Tools: new List<AITool>(), Notice: $"MCP \"{s.Name}\" non disponibile: {ex.Message}");
+                return (s.Name, Client: (McpClient?)null, Tools: new List<AITool>(), Notice: T("conn.mcpUnavailable", s.Name, ex.Message));
             }
         }));
         return (attempts.ToDictionary(a => a.Name, a => a.Tools, StringComparer.OrdinalIgnoreCase),
@@ -78,7 +80,7 @@ public static class AgentConnections
     {
         await using var client = await ConnectMcpAsync(s, allowStdio, ct);
         var tools = await client.ListToolsAsync(cancellationToken: ct);
-        return tools.Count == 0 ? "Connesso, nessun tool." : $"Connesso, {tools.Count} tool: {string.Join(", ", tools.Select(t => t.Name))}";
+        return tools.Count == 0 ? T("conn.noTools") : T("conn.tools", tools.Count, string.Join(", ", tools.Select(t => t.Name)));
     }
 
     public static async Task<(AgentCard Card, IA2AClient Client)> ConnectA2AAsync(A2AAgentConfig a, CancellationToken ct = default)
@@ -94,7 +96,7 @@ public static class AgentConnections
     public static async Task<string> TestA2AAsync(A2AAgentConfig a, CancellationToken ct = default)
     {
         var (card, _) = await ConnectA2AAsync(a, ct);
-        var skills = card.Skills is { Count: > 0 } ? string.Join(", ", card.Skills.Select(s => s.Name)) : "nessuna skill";
+        var skills = card.Skills is { Count: > 0 } ? string.Join(", ", card.Skills.Select(s => s.Name)) : T("conn.noSkills");
         return $"{card.Name} v{card.Version}: {card.Description} ({skills})";
     }
 
@@ -115,9 +117,9 @@ public static class AgentConnections
         {
             TaskState.Completed => string.Join("\n", (task.Artifacts ?? []).Select(art => TextOf(art.Parts))) is { Length: > 0 } output ? output : status,
             // shortcut: la risposta dell'utente non continua lo stesso task A2A (niente contextId/taskId salvati); serve se gli agenti remoti fanno domande spesso.
-            TaskState.InputRequired => $"Mi serve un chiarimento: {status}",
-            TaskState.AuthRequired => throw new InvalidOperationException($"l'agente remoto chiede autenticazione: {status}"),
-            var s => throw new InvalidOperationException($"task A2A {task.Id} in stato {s}{(status.Length > 0 ? ": " + status : "")}"),
+            TaskState.InputRequired => T("conn.needsInput", status),
+            TaskState.AuthRequired => throw new InvalidOperationException(T("conn.needsAuth", status)),
+            var s => throw new InvalidOperationException(T("conn.taskState", task.Id, s) + (status.Length > 0 ? ": " + status : "")),
         };
     }
 

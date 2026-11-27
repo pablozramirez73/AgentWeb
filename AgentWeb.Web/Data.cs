@@ -75,6 +75,15 @@ public sealed class ChannelMemberEntity
     public DateTimeOffset AddedAt { get; set; }
 }
 
+// Notifiche scelte per una conversazione (canale o messaggio diretto): vince sulle impostazioni dell'account.
+// Nessuna riga = predefinite. Level: NotifyLevels.All / Mentions / Mute.
+public sealed class ChannelNotifyEntity
+{
+    public string UserName { get; set; } = "";
+    public int ChannelId { get; set; }
+    public string Level { get; set; } = "";
+}
+
 public sealed class MessageEntity
 {
     public long Id { get; set; }
@@ -158,6 +167,21 @@ public sealed class TaskEntity
     public string? Agent { get; set; }   // agente che ci lavora (resta anche se passa il task a una persona)
 }
 
+// Storico dei lavori degli agenti (pagina Statistiche): durata, esito e token usati. Token a 0 quando il provider non li riporta (es. daemon).
+public sealed class AgentRunEntity
+{
+    public long Id { get; set; }
+    public string Agent { get; set; } = "";
+    public int ChannelId { get; set; }
+    public string Kind { get; set; } = "";
+    public string? Model { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public double Seconds { get; set; }
+    public string? Error { get; set; }
+    public long InputTokens { get; set; }
+    public long OutputTokens { get; set; }
+}
+
 public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<AppUser>(options)
 {
     public DbSet<ChannelEntity> Channels => Set<ChannelEntity>();
@@ -172,6 +196,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
     public DbSet<DaemonDeliveryEntity> DaemonDeliveries => Set<DaemonDeliveryEntity>();
     public DbSet<DaemonMachineEntity> DaemonMachines => Set<DaemonMachineEntity>();
     public DbSet<PushDeviceEntity> PushDevices => Set<PushDeviceEntity>();
+    public DbSet<ChannelNotifyEntity> ChannelNotify => Set<ChannelNotifyEntity>();
+    public DbSet<AgentRunEntity> AgentRuns => Set<AgentRunEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -181,6 +207,13 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         b.Entity<AppUser>().Property(u => u.NotifyMentions).HasDefaultValue(true);
         b.Entity<AppUser>().Property(u => u.NotifyPrivate).HasDefaultValue(true);
         b.Entity<AppUser>().Property(u => u.NotifyTasks).HasDefaultValue(true);
+        b.Entity<AgentRunEntity>().HasIndex(r => r.StartedAt);
+        b.Entity<AgentRunEntity>().Property(r => r.Agent).HasMaxLength(100);
+        b.Entity<AgentRunEntity>().Property(r => r.Kind).HasMaxLength(20);
+        b.Entity<AgentRunEntity>().Property(r => r.Model).HasMaxLength(200);
+        b.Entity<AgentRunEntity>().Property(r => r.Error).HasMaxLength(2000);
+        b.Entity<ChannelNotifyEntity>().HasKey(n => new { n.UserName, n.ChannelId });
+        b.Entity<ChannelNotifyEntity>().Property(n => n.Level).HasMaxLength(10);
         b.Entity<PushDeviceEntity>().HasIndex(d => d.Token).IsUnique();
         b.Entity<PushDeviceEntity>().HasIndex(d => d.UserName);
         b.Entity<PushDeviceEntity>().HasIndex(d => d.Sid);
@@ -188,7 +221,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : IdentityDbContext<A
         b.Entity<PushDeviceEntity>().Property(d => d.Token).HasMaxLength(1000);
         b.Entity<ChannelEntity>().HasIndex(c => c.Name).IsUnique();
         b.Entity<ChannelEntity>().HasIndex(c => c.DirectKey).IsUnique();
-        b.Entity<MessageEntity>().HasIndex(m => m.ChannelId);
+        // (ChannelId, Id): i non letti (Id > cursore) si contano leggendo solo i messaggi nuovi, non tutta la storia del canale.
+        b.Entity<MessageEntity>().HasIndex(m => new { m.ChannelId, m.Id });
         b.Entity<MessageEntity>().HasIndex(m => new { m.ChannelId, m.Author, m.ClientId }).IsUnique().HasFilter("\"ClientId\" IS NOT NULL");
         b.Entity<MessageEntity>().HasIndex(m => m.ParentId).HasFilter("\"ParentId\" IS NOT NULL");
         // Ricerca full-text dei messaggi (to_tsvector 'simple': nessuna lingua imposta, parole intere).

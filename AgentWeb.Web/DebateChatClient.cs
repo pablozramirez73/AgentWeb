@@ -6,6 +6,8 @@ using ModelContextProtocol.Client;
 
 using AgentWeb.Shared.Agents;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Orchestra il dibattito in un unico stream: ogni intervento è un messaggio con MessageId e AuthorName propri,
@@ -31,7 +33,7 @@ public sealed class DebateChatClient(LlmClients llms, AgentSettingsStore store, 
             foreach (var a in settings.A2AAgents.Where(a => a.Enabled))
             {
                 try { participants.Add(new Participant(a.Name, null, (await AgentConnections.ConnectA2AAsync(a, cancellationToken)).Client)); }
-                catch (Exception ex) when (ex is not OperationCanceledException) { notices.Add($"A2A \"{a.Name}\" non disponibile: {ex.Message}"); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { notices.Add(T("debate.a2aUnavailable", a.Name, ex.Message)); }
             }
 
             if (notices.Count > 0)
@@ -42,13 +44,13 @@ public sealed class DebateChatClient(LlmClients llms, AgentSettingsStore store, 
 
             var transcript = new StringBuilder();
             foreach (var m in messages)
-                transcript.AppendLine($"[{m.AuthorName ?? (m.Role == ChatRole.User ? "Utente" : "Agente")}]: {m.Text}");
+                transcript.AppendLine($"[{m.AuthorName ?? T(m.Role == ChatRole.User ? "field.user" : "field.agent")}]: {m.Text}");
 
             for (int i = 0; i < rounds * participants.Count; i++)
             {
                 var p = participants[i % participants.Count];
                 var messageId = Guid.NewGuid().ToString("N");
-                var request = $"Discussione finora:\n{transcript}\nOra intervieni tu come {p.Name}.";
+                var request = T("debate.prompt", transcript, p.Name);
                 var reply = new StringBuilder();
 
                 if (p.Remote is null)
@@ -66,7 +68,7 @@ public sealed class DebateChatClient(LlmClients llms, AgentSettingsStore store, 
                 {
                     string text;
                     try { text = await AgentConnections.AskA2AAsync(p.Remote, request, cancellationToken); }
-                    catch (Exception ex) when (ex is not OperationCanceledException) { text = $"(errore A2A: {ex.Message})"; }
+                    catch (Exception ex) when (ex is not OperationCanceledException) { text = T("debate.a2aError", ex.Message); }
                     reply.Append(text);
                     yield return Say(p.Name, messageId, text);
                 }

@@ -16,11 +16,11 @@ async function registration() {
 
 // Non navigator.serviceWorker.ready: si risolve solo per un worker che controlla questa pagina, e il nostro ha scope
 // /_content/AgentWeb.Shared/, quindi resterebbe in attesa per sempre. Per iscriversi basta che questa registrazione sia attiva.
-async function activated(reg) {
+async function activated(reg, timeoutText) {
     const w = reg.installing || reg.waiting || reg.active;
     if (!w || w.state === "activated") return;
     const done = new Promise(resolve => w.addEventListener("statechange", () => { if (w.state === "activated") resolve(); }));
-    const late = new Promise((_, reject) => setTimeout(() => reject(new Error("Il browser non ha attivato il servizio per le notifiche: ricarica la pagina e riprova.")), 15000));
+    const late = new Promise((_, reject) => setTimeout(() => reject(new Error(timeoutText)), 15000));
     await Promise.race([done, late]);
 }
 
@@ -43,10 +43,10 @@ export async function current() {
 }
 
 // null = permesso negato o browser senza Web Push (su iPhone: solo dopo "Aggiungi alla schermata Home").
-export async function subscribe(vapidPublicKey) {
+export async function subscribe(vapidPublicKey, timeoutText) {
     const reg = await registration();
     if (!reg || await (asked ?? Notification.requestPermission()) !== "granted") return null;
-    await activated(reg);
+    await activated(reg, timeoutText);
     let sub = await reg.pushManager.getSubscription();
     // Chiave del server cambiata: la vecchia iscrizione non funzionerebbe più.
     const key = keyBytes(vapidPublicKey);

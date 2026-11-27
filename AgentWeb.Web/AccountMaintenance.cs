@@ -1,11 +1,13 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Identity;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Manutenzione da terminale quando non si riesce più a entrare:
 //   dotnet run --project AgentWeb.Web -- reset-password <email> [file]
-// Genera una password nuova e robusta, sblocca l'account, chiude le sessioni web/app (i token MCP restano) e scrive
+// Genera una password nuova e robusta, sblocca l'account, chiude sessioni e token e scrive
 // la password in un file leggibile solo dal proprietario (default ~/AgentWeb-credenziali.txt). Non la stampa a schermo.
 public static class AccountMaintenance
 {
@@ -23,12 +25,12 @@ public static class AccountMaintenance
         await users.ResetAccessFailedCountAsync(user);
         var hadTwoFactor = await users.GetTwoFactorEnabledAsync(user); // telefono perso: si riattiva da Dispositivi
         if (hadTwoFactor) { await users.SetTwoFactorEnabledAsync(user, false); await users.ResetAuthenticatorKeyAsync(user); }
-        var closed = await scope.ServiceProvider.GetRequiredService<SessionStore>().RevokeAllAsync(user.UserName!, logins: true);
+        var closed = await scope.ServiceProvider.GetRequiredService<SessionStore>().RevokeAllAsync(user.UserName!);
 
-        file ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AgentWeb-credenziali.txt");
-        await File.WriteAllTextAsync(file, $"AgentWeb — account {user.UserName}\nPassword: {password}\n(generata {DateTimeOffset.Now:yyyy-MM-dd HH:mm}; cambiala da Dispositivi → Cambia password, poi elimina questo file)\n");
+        file ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), T("maint.fileName"));
+        await File.WriteAllTextAsync(file, T("maint.file", user.UserName, password, DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm")));
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        Console.WriteLine($"Password di {user.UserName} reimpostata, {closed} sessioni web/app chiuse{(hadTwoFactor ? ", verifica in due passaggi disattivata" : "")}. La password è in {file} (leggibile solo da te).");
+        Console.WriteLine(T(hadTwoFactor ? "maint.reset2fa" : "maint.reset", user.UserName, closed, file));
         return 0;
     }
 

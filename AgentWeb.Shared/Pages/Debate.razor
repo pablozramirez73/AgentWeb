@@ -5,23 +5,23 @@
 @implements IDisposable
 @inject IChatClient ChatClient
 
-<PageTitle>Dibattito tra agenti</PageTitle>
+<PageTitle>@T("debate.pageTitle")</PageTitle>
 
 <div class="page-header">
-    <h3>Dibattito</h3>
-    <p>Dai un tema: gli agenti abilitati intervengono a turno, ognuno con il suo LLM, e si rispondono a vicenda.</p>
+    <h3>@T("nav.debate")</h3>
+    <p>@T("debate.intro")</p>
 </div>
 
 <AgentBoundary Agent="agent">
     <MessageList>
         <BlockRenderer TBlock="RichContentBlock" Context="block">
             <div class="debate-msg @(block.AuthorName ?? "Utente")">
-                <strong>@(block.AuthorName ?? "Tu")</strong>
+                <strong>@(block.AuthorName ?? T("debate.you"))</strong>
                 <div style="white-space: pre-wrap">@block.RawText</div>
             </div>
         </BlockRenderer>
     </MessageList>
-    <MessageInput Placeholder="Dai un tema agli agenti (es. progettate un microservizio resiliente)..." />
+    <MessageInput Placeholder="@T("debate.placeholder")" />
 </AgentBoundary>
 
 @code {

@@ -8,6 +8,8 @@ using Microsoft.Extensions.AI;
 using OllamaSharp;
 using OpenAI;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Un IChatClient per provider configurato (Ollama locale/remoto/Cloud, compatibile OpenAI, Anthropic).
@@ -25,21 +27,20 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
     // Errori di rete in parole utili: il server gira sul VPS, quindi "localhost" e la rete di casa non sono il computer di chi configura.
     public static Exception Explain(Exception e, LlmProviderConfig p)
     {
-        if (!Uri.TryCreate(p.Url.Trim(), UriKind.Absolute, out var uri)) return new InvalidOperationException($"URL non valido: «{p.Url}».");
+        if (!Uri.TryCreate(p.Url.Trim(), UriKind.Absolute, out var uri)) return new InvalidOperationException(T("llm.badUrl", p.Url));
         var local = uri.IsLoopback || uri.Host is "0.0.0.0" or "host.docker.internal";
-        var onYourComputer = "Per usare Ollama sul tuo computer scegli il tipo «Computer di un utente (agentweb daemon)» e lì avvia " +
-            "`agentweb daemon --runtime ollama=\"ollama run <modello>\"`: il daemon si collega lui al server, nessuna porta da aprire.";
+        var onYourComputer = T("llm.onYourComputer");
         var socket = (e as HttpRequestException)?.InnerException as System.Net.Sockets.SocketException;
         return socket?.SocketErrorCode switch
         {
             System.Net.Sockets.SocketError.ConnectionRefused when local => new InvalidOperationException(
-                $"Connessione rifiutata: «{uri.Host}» qui è il server di AgentWeb, non il tuo computer. {onYourComputer}"),
+                T("llm.refusedLocal", uri.Host, onYourComputer)),
             System.Net.Sockets.SocketError.ConnectionRefused => new InvalidOperationException(
-                $"{uri.Host}:{uri.Port} rifiuta la connessione: lì Ollama non è in ascolto su quella porta (su quel computer serve OLLAMA_HOST=0.0.0.0)."),
+                T("llm.refused", uri.Host, uri.Port)),
             System.Net.Sockets.SocketError.HostNotFound or System.Net.Sockets.SocketError.NoData => new InvalidOperationException(
-                $"Il nome «{uri.Host}» non esiste per il server: usa un indirizzo raggiungibile da internet."),
+                T("llm.hostNotFound", uri.Host)),
             _ when e is TaskCanceledException or TimeoutException || e.InnerException is TimeoutException => new InvalidOperationException(
-                $"{uri.Host}:{uri.Port} non risponde dal server: non è raggiungibile da internet (rete di casa, firewall, o Ollama solo su 127.0.0.1). {onYourComputer}"),
+                T("llm.timeout", uri.Host, uri.Port, onYourComputer)),
             _ => e,
         };
     }
@@ -53,7 +54,7 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
         var key = string.Join('\u0001', p.Kind, p.Url.Trim(), p.ApiKey, m);
         if (p.Kind == LlmKinds.Daemon) return cache.GetOrAdd(key, _ => new DaemonChatClient(daemons, p.Url.Trim(), m)); // niente tool né limite: decide il daemon
         var gate = perServer.GetOrAdd(p.Kind + "|" + p.Url.Trim().TrimEnd('/'), _ => new SemaphoreSlim(maxPerServer, maxPerServer));
-        return cache.GetOrAdd(key, _ => new ThrottledChatClient(Create(p, m), gate)
+        return cache.GetOrAdd(key, _ => new UsageChatClient(new ThrottledChatClient(Create(p, m), gate), m)
             .AsBuilder()
             .UseOpenTelemetry(sourceName: AgentActivity.Name) // span gen_ai e token usati per modello (visibili solo con OpenTelemetry attivo)
             .UseFunctionInvocation(configure: f => f.AllowConcurrentInvocation = true).Build());
@@ -76,13 +77,13 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
             req.Headers.Add("anthropic-version", "2023-06-01");
             if (key is not null) req.Headers.Add("x-api-key", key);
         }
-        else throw new InvalidOperationException($"tipo di provider \"{p.Kind}\" sconosciuto");
+        else throw new InvalidOperationException(T("llm.unknownKind", p.Kind));
         if (key is not null && p.Kind != LlmKinds.Anthropic) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
 
         using var r = await http.SendAsync(req, ct);
         if (!r.IsSuccessStatusCode)
             throw new InvalidOperationException(r.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
-                ? "token API mancante o non valido" : $"il server risponde HTTP {(int)r.StatusCode}");
+                ? T("llm.badToken") : T("llm.http", (int)r.StatusCode));
         using var doc = System.Text.Json.JsonDocument.Parse(await r.Content.ReadAsStringAsync(ct));
         // Ollama: {"models":[{"name":...}]}; OpenAI e Anthropic: {"data":[{"id":...}]}
         var items = LlmKinds.IsOllama(p.Kind) ? doc.RootElement.GetProperty("models") : doc.RootElement.GetProperty("data");
@@ -94,9 +95,9 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
     public static async Task<string> TestAsync(LlmProviderConfig p, CancellationToken ct)
     {
         using var client = Create(p, p.DefaultModel);
-        var r = await client.GetResponseAsync([new(ChatRole.User, "Rispondi solo: ok")], new ChatOptions { MaxOutputTokens = 1024 } /* i modelli che "pensano" (es. gemma4) spendono token nel ragionamento prima di rispondere */, ct);
+        var r = await client.GetResponseAsync([new(ChatRole.User, T("llm.pingPrompt"))], new ChatOptions { MaxOutputTokens = 1024 } /* i modelli che "pensano" (es. gemma4) spendono token nel ragionamento prima di rispondere */, ct);
         var text = r.Text.Trim();
-        return $"{p.DefaultModel} risponde: {(text.Length > 80 ? text[..80] + "…" : text.Length == 0 ? "(vuoto)" : text)}";
+        return T("llm.answers", p.DefaultModel, text.Length > 80 ? text[..80] + "…" : text.Length == 0 ? T("llm.empty") : text);
     }
 
     static IChatClient Create(LlmProviderConfig p, string model)
@@ -121,7 +122,7 @@ public sealed class LlmClients(IConfiguration config, DaemonBroker daemons)
                 return anthropic.AsIChatClient(model, defaultMaxOutputTokens: 2048);
 
             default:
-                throw new InvalidOperationException($"tipo di provider \"{p.Kind}\" sconosciuto");
+                throw new InvalidOperationException(T("llm.unknownKind", p.Kind));
         }
     }
 }
@@ -146,5 +147,26 @@ sealed class ThrottledChatClient(IChatClient inner, SemaphoreSlim gate) : Delega
             await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken)) yield return update;
         }
         finally { gate.Release(); }
+    }
+}
+
+// Somma i token di ogni chiamata al modello nel lavoro in corso (AgentActivity.Current), per le Statistiche.
+sealed class UsageChatClient(IChatClient inner, string model) : DelegatingChatClient(inner)
+{
+    public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var r = await base.GetResponseAsync(messages, options, cancellationToken);
+        AgentActivity.Current.Value?.Add(r.Usage, r.ModelId ?? model);
+        return r;
+    }
+
+    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var u in base.GetStreamingResponseAsync(messages, options, cancellationToken))
+        {
+            foreach (var c in u.Contents) if (c is UsageContent usage) AgentActivity.Current.Value?.Add(usage.Details, u.ModelId ?? model);
+            yield return u;
+        }
     }
 }

@@ -6,9 +6,9 @@
     <div class="userbar">
         <span class="avatar" style="@AvatarColor.Style(user, "1.85rem")" aria-hidden="true">@Initials(user)</span>
         <span class="userbar-name">@user</span>
-        <button class="btn btn-link btn-sm" @onclick="Session.LogoutAsync" title="Esci">
+        <button class="btn btn-link btn-sm" @onclick="Session.LogoutAsync" title="@T("nav.signOut")">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3" /></svg>
-            Esci
+            @T("nav.signOut")
         </button>
     </div>
 }

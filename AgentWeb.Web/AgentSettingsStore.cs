@@ -1,6 +1,8 @@
 using System.Text.Json;
 using AgentWeb.Shared.Agents;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // shortcut: file JSON in chiaro (token inclusi) nella content root; per produzione passare a user-secrets/Key Vault.
@@ -24,6 +26,11 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
 
     public bool AllowStdio => env.IsDevelopment(); // stdio esegue comandi sul server: mai esporlo fuori da Development
 
+    // Cartelle degli agenti accanto a agentsettings.json (sul VPS il volume /data). L'esecuzione di file va accesa a mano:
+    // un file eseguito gira con l'utente del server e può leggere quello che legge il server.
+    public string FilesRoot => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "agentfiles");
+    public bool AllowExecute => config.GetValue<bool>("AgentFiles:AllowExecute");
+
     // Restituisce sempre una copia: le modifiche nella UI non toccano la config attiva finché non si salva.
     public AgentSettings Get()
     {
@@ -35,10 +42,12 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
 
     public void Save(AgentSettings settings)
     {
-        var errors = settings.Validate(AllowStdio);
+        var errors = settings.Validate(AllowStdio, AllowExecute);
         if (errors.Count > 0) throw new InvalidOperationException(string.Join(" ", errors));
         lock (gate)
         {
+            // Prima le cartelle, poi il file: se una cartella non si crea, agente e diritti non vengono salvati.
+            foreach (var a in settings.LocalAgents.Where(a => a.Files.Count > 0)) Directory.CreateDirectory(AgentFiles.DirFor(FilesRoot, a.Name));
             var tmp = path + ".tmp";
             var text = JsonSerializer.Serialize(settings, Json);
             File.WriteAllText(tmp, text);
@@ -49,7 +58,7 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
         icons.For(settings.LocalAgents.Where(a => a.Enabled)); // agenti nuovi: l'icona si disegna subito, in background
     }
 
-    public Task<AgentSettingsView> GetAsync(CancellationToken ct = default) => Task.FromResult(new AgentSettingsView(Get(), AllowStdio));
+    public Task<AgentSettingsView> GetAsync(CancellationToken ct = default) => Task.FromResult(new AgentSettingsView(Get(), AllowStdio, AllowExecute));
 
     public Task SaveAsync(AgentSettings settings, CancellationToken ct = default) { Save(settings); return Task.CompletedTask; }
 
@@ -60,8 +69,8 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
     public async Task<string> TestLlmAsync(LlmProviderConfig provider, CancellationToken ct = default) => provider.Kind != LlmKinds.Daemon
         ? await Explained(() => LlmClients.TestAsync(provider, ct), provider, ct)
         : await daemons.OffersAsync(provider.Url.Trim(), provider.DefaultModel)
-            ? $"Il daemon di {provider.Url.Trim()} è collegato e offre «{provider.DefaultModel}»."
-            : throw new InvalidOperationException($"Nessun daemon di {provider.Url.Trim()} collegato con il runtime «{provider.DefaultModel}».");
+            ? T("settings.daemonOk", provider.Url.Trim(), provider.DefaultModel)
+            : throw new InvalidOperationException(T("settings.daemonMissing", provider.Url.Trim(), provider.DefaultModel));
 
     // Per un daemon i "modelli" sono i runtime che i suoi computer collegati offrono.
     public Task<List<string>> ListModelsAsync(LlmProviderConfig provider, CancellationToken ct = default) =>

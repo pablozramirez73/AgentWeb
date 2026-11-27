@@ -6,6 +6,8 @@ using Microsoft.Extensions.AI;
 using Npgsql;
 using OllamaSharp;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 public sealed record MemoryHit(long Id, string Scope, string Kind, string? Title, string Content, double Distance);
@@ -16,6 +18,7 @@ public sealed record MemoryHit(long Id, string Scope, string Kind, string? Title
 public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration config, ILogger<MemoryStore> log)
 {
     public const int Dimensions = 768;
+    const int EmbedBatch = 64;
     const int ChunkChars = 900, ChunkOverlap = 150, MaxDocumentChars = 1_000_000;
 
     IEmbeddingGenerator<string, Embedding<float>>? embedder;
@@ -33,10 +36,12 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
 
     public async Task<int> AddDocumentAsync(int channelId, string fileName, string text, string user, CancellationToken ct = default)
     {
-        if (text.Length > MaxDocumentChars) throw new ArgumentException("Documento troppo grande: massimo circa 1 MB di testo.");
+        if (text.Length > MaxDocumentChars) throw new ArgumentException(T("memory.tooBig"));
         var chunks = Chunk(text).ToList();
-        if (chunks.Count == 0) throw new ArgumentException("Il documento è vuoto.");
-        var vectors = await EmbedAsync(chunks, ct);
+        if (chunks.Count == 0) throw new ArgumentException(T("memory.empty"));
+        // A gruppi: un documento da 1 MB sono ~1.300 pezzi, troppi per una sola chiamata entro il timeout dell'embedding.
+        var vectors = new List<float[]>(chunks.Count);
+        foreach (var batch in chunks.Chunk(EmbedBatch)) vectors.AddRange(await EmbedAsync(batch, ct));
         var source = Guid.NewGuid().ToString("N");
         await using var db = await dbf.CreateDbContextAsync(ct);
         var rows = chunks.Select(c => new MemoryEntity
@@ -46,7 +51,15 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         }).ToList();
         db.Memories.AddRange(rows);
         await db.SaveChangesAsync(ct);
-        for (var i = 0; i < rows.Count; i++) await SetEmbeddingAsync(db, rows[i].Id, vectors[i], ct);
+        for (var i = 0; i < rows.Count; i += EmbedBatch) // un UPDATE per gruppo invece di uno per pezzo
+        {
+            var n = Math.Min(EmbedBatch, rows.Count - i);
+            await db.Database.ExecuteSqlRawAsync("""
+                UPDATE "Memories" m SET "Embedding" = CAST(v.e AS vector)
+                FROM unnest(@ids, @vecs) AS v(id, e) WHERE m."Id" = v.id
+                """, [new NpgsqlParameter("ids", rows.Skip(i).Take(n).Select(r => r.Id).ToArray()),
+                      new NpgsqlParameter("vecs", vectors.Skip(i).Take(n).Select(Literal).ToArray())], ct);
+        }
         return rows.Count;
     }
 
@@ -114,11 +127,14 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         await using var db = await dbf.CreateDbContextAsync(ct);
         var rows = await db.Memories.AsNoTracking().Where(m => m.Scope == "channel" && m.ChannelId == channelId).OrderByDescending(m => m.Id).ToListAsync(ct);
         var docs = rows.Where(m => m.Kind == "document").GroupBy(m => m.SourceId)
-            .Select(g => new MemoryDto(g.Min(m => m.Id), "document", g.First().Title, g.OrderBy(m => m.Id).First().Content[..Math.Min(200, g.First().Content.Length)],
+            .Select(g => new MemoryDto(g.Min(m => m.Id), "document", g.First().Title, Preview(g.MinBy(m => m.Id)!.Content),
                 g.First().CreatedBy, g.First().CreatedAt, g.Key, g.Count()));
         var others = rows.Where(m => m.Kind != "document").Select(m => new MemoryDto(m.Id, m.Kind, m.Title, m.Content, m.CreatedBy, m.CreatedAt, null, 1));
         return [.. others.Concat(docs).OrderByDescending(m => m.CreatedAt)];
     }
+
+    // Anteprima del primo pezzo del documento (le righe sono ordinate per Id decrescente: First() è l'ultimo pezzo).
+    static string Preview(string content) => content.Length > 200 ? content[..200] : content;
 
     public async Task<bool> DeleteChannelMemoryAsync(int channelId, long id, CancellationToken ct = default)
     {
@@ -153,18 +169,12 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         if (pending.Count <= threshold) return;
         var old = pending.Take(pending.Count - keep).ToList();
         var transcript = string.Join("\n", old.Select(m => $"[{m.Author}]: {m.Text}"));
-        var prompt = $"""
-            Riassumi la conversazione di un canale di lavoro in italiano, in elenco puntato, massimo 250 parole.
-            Conserva decisioni, numeri, nomi, compiti assegnati e questioni aperte. Niente frasi introduttive.
-            {(previous is { } p ? $"Riassunto precedente da integrare:\n{p.Text}\n" : "")}
-            Nuovi messaggi:
-            {transcript}
-            """;
+        var prompt = T("memory.summaryPrompt", previous is { } p ? T("memory.previousSummary", p.Text) : "", transcript);
         var summary = (await llm.GetResponseAsync([new(ChatRole.User, prompt)], cancellationToken: ct)).Text.Trim();
         if (summary.Length == 0) return;
         await AddAsync(new MemoryEntity
         {
-            Scope = "channel", ChannelId = channelId, Kind = "summary", Title = $"Riassunto fino al messaggio {old[^1].Id}",
+            Scope = "channel", ChannelId = channelId, Kind = "summary", Title = T("memory.summaryTitle", old[^1].Id),
             Content = summary, UpToMessageId = old[^1].Id, CreatedBy = "Sistema",
         }, ct);
     }
@@ -176,7 +186,7 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         var result = await Embedder.GenerateAsync(texts, cancellationToken: ct);
         var vectors = result.Select(e => e.Vector.ToArray()).ToArray();
         if (vectors.Any(v => v.Length != Dimensions))
-            throw new InvalidOperationException($"Il modello di embedding produce vettori da {vectors[0].Length} dimensioni, la memoria ne usa {Dimensions}.");
+            throw new InvalidOperationException(T("memory.dimensions", vectors[0].Length, Dimensions));
         return vectors;
     }
 

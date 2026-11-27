@@ -1,3 +1,4 @@
+using static AgentWeb.Shared.Lang;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -77,7 +78,7 @@ public sealed class ApiClient(HttpClient http, CredentialStore store, Credential
         if (r.StatusCode == HttpStatusCode.Unauthorized)
         {
             r.Dispose();
-            throw new CliException("Sessione scaduta o revocata: esegui di nuovo `agentweb login`.", ExitCodes.Unauthenticated);
+            throw new CliException(T("cli.sessionExpired"), ExitCodes.Unauthenticated);
         }
         return r;
     }

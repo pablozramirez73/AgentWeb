@@ -84,7 +84,16 @@ public static class AgentApi
         });
         ws.MapGet("/feed", (WorkspaceStore s, ClaimsPrincipal u) => s.GetFeedAsync(User(u)));
         ws.MapGet("/activity", (WorkspaceStore s, AgentActivity a, ClaimsPrincipal u) => s.GetActivityAsync(User(u), a));
+        ws.MapGet("/stats", (int? days, WorkspaceStore s, ClaimsPrincipal u) => s.GetStatsAsync(User(u), days ?? 30));
+        ws.MapGet("/agents/{agent}/log", (string agent, int? days, WorkspaceStore s, ClaimsPrincipal u) =>
+            s.GetAgentLogAsync(User(u), agent, days ?? 7));
         ws.MapGet("/tasks", (WorkspaceStore s, ClaimsPrincipal u) => s.GetAllTasksAsync(User(u)));
+        ws.MapGet("/channels/{id:int}/notifications", (int id, WorkspaceStore s, ClaimsPrincipal u) => s.GetChannelNotifyAsync(id, User(u)));
+        ws.MapPut("/channels/{id:int}/notifications", async (int id, ChannelNotifyDto b, WorkspaceStore s, ClaimsPrincipal u) =>
+        {
+            await s.SetChannelNotifyAsync(id, User(u), b.Level);
+            return Results.NoContent();
+        });
         ws.MapPost("/direct", (NameBody b, WorkspaceStore s, ClaimsPrincipal u) => s.OpenDirectAsync(User(u), b.Name));
         ws.MapGet("/people", (WorkspaceStore s, ClaimsPrincipal u) => s.GetPeopleAsync(User(u)));
         ws.MapGet("/channels/{id:int}/tasks", (int id, WorkspaceStore s, ClaimsPrincipal u) => s.GetTasksAsync(id, User(u)));
@@ -103,7 +112,7 @@ public static class AgentApi
         settings.MapGet("", (AgentSettingsStore store) => store.GetAsync());
         settings.MapPut("", (AgentSettings body, AgentSettingsStore store) =>
         {
-            var errors = body.Validate(store.AllowStdio);
+            var errors = body.Validate(store.AllowStdio, store.AllowExecute);
             if (errors.Count > 0) return Results.Text(string.Join("\n", errors), statusCode: 400);
             store.Save(body);
             return Results.NoContent();

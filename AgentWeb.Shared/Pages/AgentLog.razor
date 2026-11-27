@@ -1,0 +1,239 @@
+@page "/stats/agents"
+@rendermode InteractiveWebAssembly
+@implements IDisposable
+@inject IWorkspaceClient Ws
+
+<PageTitle>@T("settings.agents") · @T("nav.stats") · AgentWeb</PageTitle>
+
+@* Statistiche → Agenti: a sinistra l'albero degli agenti (sotto quello scelto, i canali dove ha lavorato o parlato),
+   a destra cosa sta facendo, lo storico dei suoi lavori e i messaggi con persone e altri agenti, più recenti in alto. *@
+<div class="stats-page">
+    <header class="stats-head">
+        <h2>@T("nav.stats")</h2>
+        <StatsTabs />
+        <div class="seg" role="group" aria-label="@T("stats.period")">
+            @foreach (var d in Periods)
+            {
+                <button class="@(days == d ? "on" : "")" @onclick="() => SetDaysAsync(d)">@(d == 1 ? T("log.24h") : T("stats.days", d))</button>
+            }
+        </div>
+    </header>
+
+    @if (error is not null) { <div class="alert alert-danger py-2" role="alert">@error</div> }
+
+    <div class="agent-log">
+        <nav class="agent-tree card-block" aria-label="@T("settings.agents")">
+            @if (agents is null) { <p class="text-muted m-0">@T("common.loading")</p> }
+            else if (agents.Count == 0) { <p class="text-muted m-0">@T("log.noAgents")</p> }
+            else
+            {
+                <ul role="tree">
+                    @foreach (var a in agents)
+                    {
+                        var open = a == agent;
+                        <li role="treeitem" aria-expanded="@(open ? "true" : "false")" aria-selected="@(open && channel is null ? "true" : "false")">
+                            <button class="node @(open && channel is null ? "on" : "")" @onclick="() => SelectAsync(a)">
+                                <span class="caret" aria-hidden="true">@(open ? "▾" : "▸")</span>
+                                <span class="dot @(IsRunning(a) ? "live" : "")" title="@T(IsRunning(a) ? "log.working" : "log.idle")"></span>
+                                @a
+                            </button>
+                            @if (open && log is not null)
+                            {
+                                <ul role="group">
+                                    @foreach (var c in Channels)
+                                    {
+                                        <li role="treeitem" aria-selected="@(channel == c.Id ? "true" : "false")">
+                                            <button class="node leaf @(channel == c.Id ? "on" : "")" @onclick="() => channel = channel == c.Id ? null : c.Id">
+                                                #@c.Name <span class="count">@c.Count</span>
+                                            </button>
+                                        </li>
+                                    }
+                                    @if (Channels.Count == 0) { <li class="text-muted small ps-4">@T("log.noChannels")</li> }
+                                </ul>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </nav>
+
+        <section class="agent-detail" aria-live="polite">
+            @if (agent is null) { <p class="text-muted card-block m-0">@T("log.pickAgent")</p> }
+            else if (log is null) { <p class="text-muted card-block m-0">@T("common.loading")</p> }
+            else
+            {
+                var runs = log.Runs.Where(r => channel is null || r.ChannelId == channel).ToList();
+                var totals = log.Totals.Where(t => channel is null || t.ChannelId == channel).ToList();
+                var running = activity?.Running.Where(r => r.Agent == agent && (channel is null || r.ChannelId == channel)).ToList() ?? [];
+                <section class="tiles">
+                    <div class="tile"><span class="tile-label">@T("stats.runs")</span><strong>@totals.Sum(t => t.Runs)</strong><span class="tile-sub">@T("log.delegationsReceived", totals.Sum(t => t.Delegations))</span></div>
+                    <div class="tile"><span class="tile-label">@T("stats.errors")</span><strong>@totals.Sum(t => t.Errors)</strong><span class="tile-sub">@T("log.inPeriod")</span></div>
+                    <div class="tile"><span class="tile-label">Token</span><strong>@Num(totals.Sum(t => t.InputTokens + t.OutputTokens))</strong><span class="tile-sub">@Num(totals.Sum(t => t.InputTokens)) in · @Num(totals.Sum(t => t.OutputTokens)) out</span></div>
+                </section>
+
+                <div class="card-block now">
+                    @if (running.Count == 0) { <span class="text-muted">@T("log.notWorking", agent)</span> }
+                    @foreach (var r in running)
+                    {
+                        <div><span class="dot live"></span> <strong>@Kind(r.Kind)</strong> @T("log.in") <a href="channels/@r.ChannelId">#@r.Channel</a> · @T("log.for", Since(r.StartedAt))</div>
+                    }
+                </div>
+
+                <div class="log-head">
+                    <h3 class="section-label m-0">@T("log.title")</h3>
+                    <div class="seg" role="group" aria-label="@T("log.show")">
+                        @foreach (var (key, label) in Shows)
+                        {
+                            <button class="@(show == key ? "on" : "")" @onclick="() => show = key">@label</button>
+                        }
+                    </div>
+                </div>
+                <div class="card-block p-0 timeline">
+                    @{ var items = Timeline(runs).ToList(); }
+                    @if (items.Count == 0) { <p class="text-muted m-0 p-3">@T("log.nothing")</p> }
+                    @foreach (var (at, run, hit) in items)
+                    {
+                        if (run is not null)
+                        {
+                            <div class="entry run @(run.Error is null ? "" : "failed")">
+                                <div class="entry-meta">
+                                    <span class="entry-icon" aria-hidden="true">@(run.Error is null ? "⚙" : "⚠")</span>
+                                    <strong>@Kind(run.Kind)</strong> · <a href="channels/@run.ChannelId">#@run.Channel</a> · @Time(at) · @Secs(run.Seconds)
+                                    @if (run.InputTokens + run.OutputTokens > 0) { <text> · @Num(run.InputTokens) in / @Num(run.OutputTokens) out</text> }
+                                    @if (run.Model is not null) { <text> · </text><span class="mono">@run.Model</span> }
+                                </div>
+                                @if (run.Error is not null) { <div class="err-text">@run.Error</div> }
+                            </div>
+                        }
+                        else if (hit is not null)
+                        {
+                            var m = hit.Message;
+                            var mine = m.Author == agent;
+                            <div class="entry msg @(mine ? "mine" : "") @(Asks.Any(m.Text.StartsWith) ? "delegation" : "")">
+                                <div class="entry-meta">
+                                    <span class="entry-icon" aria-hidden="true">@(m.Kind == AuthorKind.Agent ? "✦" : "●")</span>
+                                    <strong>@m.Author</strong> @if (m.Kind == AuthorKind.Agent && !mine) { <span class="item-tag">@T("log.agentTag")</span> }
+                                    · <a href="channels/@m.ChannelId">#@hit.ChannelName</a>@(m.ParentId is null ? "" : " · " + T("log.inThread")) · @Time(at)
+                                </div>
+                                <div class="entry-text">@m.Text</div>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    static readonly int[] Periods = [1, 7, 30];
+    static (string Key, string Label)[] Shows => [("all", T("log.all")), ("runs", T("stats.runs")), ("messages", T("nav.messages"))];
+    // Le deleghe scritte dagli agenti iniziano così (stessa chiave usata dal server in WorkspaceStore).
+    // "→ chiedo a ", "→ asking ": i messaggi restano nella lingua in cui sono stati scritti.
+    static readonly string[] Asks = Every("agent.asks").Select(t => t.Split("{0}")[0]).ToArray();
+    int days = 7;
+    string show = "all";
+    List<string>? agents;
+    string? agent;
+    int? channel;
+    AgentLogDto? log;
+    ActivityDto? activity;
+    string? error;
+    CancellationTokenSource? pendingReload;
+    readonly CancellationTokenSource stop = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Ws.StartAsync();
+            Ws.Changed += OnEvent;
+            agents = await Ws.GetAgentsAsync();
+            activity = await Ws.GetActivityAsync();
+        }
+        catch (Exception ex) { error = ex.GetBaseException().Message; }
+        if (OperatingSystem.IsBrowser() || OperatingSystem.IsIOS() || OperatingSystem.IsAndroid()) _ = RefreshActivityAsync(); // non durante il prerender
+    }
+
+    async Task SelectAsync(string a)
+    {
+        channel = null;
+        if (agent == a) { agent = null; log = null; return; } // secondo clic: chiude il ramo
+        agent = a; log = null;
+        await LoadAsync();
+    }
+
+    async Task SetDaysAsync(int d) { days = d; await LoadAsync(); }
+
+    async Task LoadAsync()
+    {
+        if (agent is not { } a) return;
+        var d = days;
+        error = null;
+        try
+        {
+            var l = await Ws.GetAgentLogAsync(a, d);
+            if (a == agent && d == days) log = l; // nel frattempo può aver scelto un altro agente o periodo
+        }
+        catch (Exception ex) { error = ex.GetBaseException().Message; }
+    }
+
+    // I canali del ramo: dove l'agente ha lavorato o parlato nel periodo, i più attivi in alto.
+    List<(int Id, string Name, int Count)> Channels => log is null ? [] :
+        log.Runs.Select(r => (r.ChannelId, r.Channel)).Concat(log.Messages.Select(m => (m.Message.ChannelId, m.ChannelName)))
+            .GroupBy(x => x).Select(g => (g.Key.Item1, g.Key.Item2, g.Count())).OrderByDescending(x => x.Item3).ToList();
+
+    IEnumerable<(DateTimeOffset At, RunLogDto? Run, SearchHitDto? Hit)> Timeline(List<RunLogDto> runs)
+    {
+        var r = show == "messages" ? [] : runs.Select(x => (x.StartedAt, (RunLogDto?)x, (SearchHitDto?)null));
+        var m = show == "runs" ? [] : log!.Messages.Where(x => channel is null || x.Message.ChannelId == channel)
+            .Select(x => (x.Message.At, (RunLogDto?)null, (SearchHitDto?)x));
+        return r.Concat(m).OrderByDescending(x => x.Item1);
+    }
+
+    bool IsRunning(string a) => activity?.Running.Any(r => r.Agent == a) == true;
+
+    // shortcut: lavori in corso ogni 5 s (come la pagina Attività) invece di un evento dedicato.
+    async Task RefreshActivityAsync()
+    {
+        var token = stop.Token; // letto subito: dopo Dispose leggere stop.Token lancia
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                try { activity = await Ws.GetActivityAsync(); } catch (Exception) { continue; }
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    // Un messaggio che riguarda l'agente aperto ricarica il registro (al massimo uno ogni 400 ms).
+    void OnEvent(WorkspaceEvent e)
+    {
+        if (e is not { Kind: "message", Message: { } m } || agent is not { } a) return;
+        if (m.Author != a && !m.Text.Contains(a, StringComparison.OrdinalIgnoreCase)) return;
+        _ = InvokeAsync(async () =>
+        {
+            pendingReload?.Cancel();
+            var cts = pendingReload = new();
+            try { await Task.Delay(400, cts.Token); } catch (OperationCanceledException) { return; }
+            await LoadAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Ws.Changed -= OnEvent;
+        stop.Cancel(); stop.Dispose();
+        pendingReload?.Cancel();
+    }
+
+    static string Kind(string k) => k switch { "risposta" => T("log.kind.reply"), "task" => "Task", "delega" => T("log.kind.delegation"), _ => k };
+    static string Time(DateTimeOffset at) => at.ToLocalTime().ToString("dd/MM HH:mm:ss");
+    static string Since(DateTimeOffset at) => (DateTimeOffset.UtcNow - at) is var d && d.TotalMinutes >= 1 ? $"{(int)d.TotalMinutes} min" : $"{(int)d.TotalSeconds} s";
+    static string Num(long n) => n >= 1_000_000 ? $"{n / 1_000_000.0:0.#} M" : n >= 10_000 ? $"{n / 1000.0:0.#} k" : n.ToString("N0");
+    static string Secs(double s) => s >= 60 ? $"{s / 60:0.#} min" : $"{s:0.#} s";
+}

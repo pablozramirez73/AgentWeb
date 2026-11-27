@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // L'UNICO posto che decide chi vede un canale. Lo usano lista canali, messaggi, task, membri (HTTP),
@@ -16,6 +18,6 @@ public static class ChannelVisibility
     // Per chi non vede il canale è come se non esistesse: 404, non 403 (non rivela che c'è).
     public static async Task EnsureAccessAsync(AppDb db, int channelId, string userName)
     {
-        if (!await CanAccessAsync(db, channelId, userName)) throw new KeyNotFoundException($"Canale {channelId} inesistente.");
+        if (!await CanAccessAsync(db, channelId, userName)) throw new KeyNotFoundException(T("nf.channel", channelId));
     }
 }

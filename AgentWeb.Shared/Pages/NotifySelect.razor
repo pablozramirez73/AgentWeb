@@ -1,0 +1,32 @@
+@* Notifiche di una conversazione (canale o messaggio diretto): vince sulle impostazioni dell'account. *@
+@inject IWorkspaceClient Ws
+
+<select class="form-select form-select-sm w-auto" aria-label="@T("notify.thisConversation")" title="@error"
+        value="@level" disabled="@(level is null)" @onchange="ChangeAsync">
+    <option value="@NotifyLevels.Default">🔔 @T("notify.default")</option>
+    <option value="@NotifyLevels.All">🔔 @T("notify.all")</option>
+    <option value="@NotifyLevels.Mentions">🔔 @T("notify.mentions")</option>
+    <option value="@NotifyLevels.Mute">🔕 @T("notify.mute")</option>
+</select>
+
+@code {
+    [Parameter, EditorRequired] public int ChannelId { get; set; }
+    string? level, error;
+    int loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loaded == ChannelId) return;
+        (loaded, level, error) = (ChannelId, null, null);
+        try { level = (await Ws.GetChannelNotifyAsync(ChannelId)).Level; }
+        catch (Exception ex) { error = ex.GetBaseException().Message; }
+    }
+
+    async Task ChangeAsync(ChangeEventArgs e)
+    {
+        var previous = level;
+        level = e.Value as string ?? NotifyLevels.Default;
+        try { await Ws.SetChannelNotifyAsync(ChannelId, level); error = null; }
+        catch (Exception ex) { level = previous; error = ex.GetBaseException().Message; }
+    }
+}

@@ -97,11 +97,17 @@ public sealed class Phase7AccountTests
         await app.CreateUserAsync(Alice);
         using var laptop = await app.LoginAsync(Alice);
         using var phone = await app.LoginAsync(Alice);
+        var token = (await (await laptop.PostAsJsonAsync("/api/account/tokens", new NewApiTokenRequest("mcp"))).Content.ReadFromJsonAsync<ApiTokenDto>())!.Token;
+        using var mcp = app.CreateClient();
+        mcp.DefaultRequestHeaders.Authorization = new("Bearer", token);
+        Task<HttpStatusCode> McpStatus() => mcp.PostAsJsonAsync("/mcp", new { }).ContinueWith(t => t.Result.StatusCode); // i token valgono solo per /mcp
+        Assert.NotEqual(HttpStatusCode.Unauthorized, await McpStatus());
 
         var r = await laptop.PostAsJsonAsync("/api/account/password", new ChangePasswordRequest(TestApp.Password, "Nuova!Pass9"));
         Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await laptop.GetAsync("/api/workspace/channels")).StatusCode);       // chi l'ha cambiata resta dentro
         Assert.Equal(HttpStatusCode.Unauthorized, (await phone.GetAsync("/api/workspace/channels")).StatusCode); // gli altri no
+        Assert.Equal(HttpStatusCode.Unauthorized, await McpStatus()); // nemmeno i token
 
         using var anon = app.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsJsonAsync("/identity/login", new { email = Alice, password = TestApp.Password })).StatusCode);

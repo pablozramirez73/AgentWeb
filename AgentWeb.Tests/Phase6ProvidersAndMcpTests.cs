@@ -55,15 +55,15 @@ public sealed class FakeLlm : IAsyncDisposable
             {
                 var parts = model.Split(':', 3);
                 if (toolResult is null)
-                    return Completion(null, "tool_calls", new[] { new { id = "call_t", type = "function", function = new { name = parts[1], arguments = parts[2].Replace("{URL}", self.Url) } } });
-                return Completion($"fatto: {toolResult}", "stop", null);
+                    return Completion(model, null, "tool_calls", new[] { new { id = "call_t", type = "function", function = new { name = parts[1], arguments = parts[2].Replace("{URL}", self.Url) } } });
+                return Completion(model, $"fatto: {toolResult}", "stop", null);
             }
             if (model == "capo" && toolResult is null)
-                return Completion(content: null, finish: "tool_calls", toolCalls: new[]
+                return Completion(model, content: null, finish: "tool_calls", toolCalls: new[]
                 {
                     new { id = "call_1", type = "function", function = new { name = "ask_agent", arguments = """{"agent":"Esperto","question":"dammi un parere"}""" } },
                 });
-            return Completion(model == "capo" ? $"sintesi: {toolResult}" : reply, "stop", null);
+            return Completion(model, model == "capo" ? $"sintesi: {toolResult}" : reply, "stop", null);
         });
         app.MapGet("/v1/models", () => Results.Json(new { data = new[] { new { id = "modello-b" }, new { id = "modello-a" } } }));
         app.MapGet("/pagina", () => Results.Content("<html><head><script>alert(1)</script></head><body><h1>Listino 2027</h1><p>Il piano Pro costa 42 euro.</p></body></html>", "text/html"));
@@ -84,9 +84,10 @@ public sealed class FakeLlm : IAsyncDisposable
         return self;
     }
 
-    static IResult Completion(string? content, string finish, object? toolCalls) => Results.Json(new
+    // Il modello della risposta è quello richiesto, come fanno i provider veri (le Statistiche lo usano).
+    static IResult Completion(string model, string? content, string finish, object? toolCalls) => Results.Json(new
     {
-        id = "chatcmpl-1", @object = "chat.completion", created = 1, model = "finto",
+        id = "chatcmpl-1", @object = "chat.completion", created = 1, model,
         choices = new[] { new { index = 0, message = new { role = "assistant", content, tool_calls = toolCalls }, finish_reason = finish } },
         usage = new { prompt_tokens = 1, completion_tokens = 1, total_tokens = 2 },
     });
@@ -240,6 +241,20 @@ public sealed class Phase6AgentsTests : IAsyncLifetime
         Assert.Contains(messages, m => m.Author == "Capo" && m.Text == "→ chiedo a Esperto: dammi un parere");
         Assert.Contains(messages, m => m.Author == "Esperto" && m.Text == "parere dell'esperto");
         Assert.Contains(llm.Requests, r => r.EndsWith(" esperto")); // Esperto ha usato il suo LLM
+
+        // Statistiche: la delega è un lavoro di Esperto, con il suo modello e i suoi token; Capo conta solo le sue chiamate
+        // (2: chiede lo strumento, poi la sintesi), Esperto la sua (1). Il FakeLlm riporta 1 token in e 1 out per chiamata.
+        StatsDto? stats = null;
+        for (var i = 0; i < 50 && stats?.Agents.Count != 2; i++)
+        {
+            if (i > 0) await Task.Delay(100); // lo storico si scrive appena finisce il lavoro, dopo lo stato del task
+            stats = await alice.GetFromJsonAsync<StatsDto>("/api/workspace/stats?days=1");
+        }
+        var byAgent = stats!.Agents.ToDictionary(a => a.Agent, a => (a.Runs, a.InputTokens, a.OutputTokens));
+        Assert.Equal((1, 2L, 2L), byAgent["Capo"]);
+        Assert.Equal((1, 1L, 1L), byAgent["Esperto"]);
+        Assert.Equal(new Dictionary<string, long> { ["capo"] = 4, ["esperto"] = 2 },
+            stats.Models.ToDictionary(m => m.Model, m => m.InputTokens + m.OutputTokens));
     }
 
     [Fact]

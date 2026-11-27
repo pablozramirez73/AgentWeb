@@ -24,7 +24,21 @@ public enum WorkStatus { Todo, InProgress, Done, Failed, Backlog, Closed }
 
 // Pagina Attività: lavori degli agenti in corso e ultimi terminati (Seconds/Error), task aperti.
 public sealed record AgentRunDto(string Agent, int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double? Seconds, string? Error);
+// Pagina Statistiche: ultimi Days giorni (UTC), solo canali visibili. Errors: gli ultimi lavori falliti.
+public sealed record StatsDto(int Days, List<DayStatDto> Daily, List<AgentStatDto> Agents, List<ModelStatDto> Models,
+    List<AgentRunDto> Errors, List<StatusCountDto> Tasks);
+public sealed record DayStatDto(DateOnly Day, int Runs, int Errors, long InputTokens, long OutputTokens, int Messages);
+public sealed record AgentStatDto(string Agent, int Runs, int Errors, long InputTokens, long OutputTokens, double AvgSeconds, double MaxSeconds);
+public sealed record ModelStatDto(string Model, int Runs, long InputTokens, long OutputTokens);
+public sealed record StatusCountDto(WorkStatus Status, int Count);
 public sealed record ActivityDto(List<AgentRunDto> Running, List<AgentRunDto> Recent, List<TaskDto> OpenTasks);
+// Statistiche → Agenti: un agente negli ultimi Days giorni, solo canali visibili, più recenti per primi (max 200 per elenco).
+// Messages: scritti da lui, che lo @menzionano o che gli delegano lavoro ("→ chiedo a <agente>:").
+// Totals: per canale, su tutto il periodo (anche oltre i 200 lavori elencati).
+public sealed record AgentLogDto(string Agent, List<RunTotalsDto> Totals, List<RunLogDto> Runs, List<SearchHitDto> Messages);
+public sealed record RunTotalsDto(int ChannelId, int Runs, int Errors, int Delegations, long InputTokens, long OutputTokens);
+public sealed record RunLogDto(int ChannelId, string Channel, string Kind, DateTimeOffset StartedAt, double Seconds, string? Error,
+    string? Model, long InputTokens, long OutputTokens);
 
 // Pagina Attività (inbox): una voce per canale (Root = null) o per thread che ti riguarda (scritto, risposto o menzionato).
 // Last: l'ultimo messaggio (del canale fuori dai thread, oppure del thread). Unread: messaggi altrui non ancora letti.
@@ -92,11 +106,15 @@ public interface IWorkspaceClient
     Task<List<SearchHitDto>> SearchAsync(string query);
     Task<string> WhoAmIAsync(); // utente corrente (per riconoscere le proprie @menzioni)
     Task<ActivityDto> GetActivityAsync(); // cosa stanno facendo gli agenti, solo nei canali visibili
+    Task<StatsDto> GetStatsAsync(int days); // token, errori e lavori degli ultimi giorni, solo nei canali visibili
+    Task<AgentLogDto> GetAgentLogAsync(string agent, int days); // lavori e messaggi di un agente, solo nei canali visibili
     Task<List<FeedItemDto>> GetFeedAsync(); // inbox della pagina Attività, più recenti per primi
     Task<List<MessageDto>> GetThreadAsync(int channelId, long rootId);
     Task MarkThreadReadAsync(int channelId, long rootId, long lastId); // segna letto il thread senza toccare il resto del canale
     Task<List<TaskDto>> GetTasksAsync(int channelId);
     Task<List<TaskDto>> GetAllTasksAsync();
+    Task<ChannelNotifyDto> GetChannelNotifyAsync(int channelId);
+    Task SetChannelNotifyAsync(int channelId, string level); // NotifyLevels
     Task<ChannelDto> OpenDirectAsync(string with); // conversazione diretta con una persona (email) o un agente: la crea la prima volta
     Task<List<string>> GetPeopleAsync();          // persone viste nei canali che l'utente vede (per scegliere a chi scrivere) // pagina Task: tutti i task dei canali visibili, aggiornati di recente per primi
     Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest task);
@@ -130,6 +148,13 @@ public sealed record ProfileDto(string UserName, string? DisplayName, string? Av
 
 // Notifiche push. Kind del dispositivo: "web" (Web Push, Token = endpoint), "apns" (iPhone), "pushy" (Android).
 public sealed record NotificationSettingsDto(bool Mentions, bool Private, bool Tasks);
+// Notifiche di una sola conversazione. Default ("") = segue le impostazioni dell'account.
+public sealed record ChannelNotifyDto(string Level);
+public static class NotifyLevels
+{
+    public const string Default = "", All = "all", Mentions = "mentions", Mute = "mute";
+    public static readonly string[] Values = [Default, All, Mentions, Mute];
+}
 public sealed record PushDeviceRequest(string Kind, string Token, string? P256dh = null, string? Auth = null);
 public sealed record PushTokenRequest(string Token);
 public sealed record PushConfigDto(string VapidPublicKey, List<string> Kinds); // Kinds: i servizi attivi sul server

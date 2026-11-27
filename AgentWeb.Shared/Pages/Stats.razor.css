@@ -1,0 +1,58 @@
+/* Colori delle serie (palette categorica validata: slot 1 blu, slot 2 arancio; "bad" = stato critico dell'app). */
+.stats-page { --s1: #257de0; --s2: #f47230; --bad: var(--danger); display: flex; flex-direction: column; gap: .9rem; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme=light]) .stats-page { --s1: #338ced; --s2: #e76624; } }
+:root[data-theme=dark] .stats-page { --s1: #338ced; --s2: #e76624; }
+
+.stats-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; }
+.stats-head h2 { font-family: var(--font-display); font-size: 1.35rem; font-weight: 700; margin: 0; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-2); }
+.seg button { border: 0; background: transparent; color: var(--muted); font-weight: 600; padding: .35rem .75rem; border-radius: 8px; }
+.seg button.on { background: var(--ink); color: var(--ink-contrast); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; }
+.tile { display: flex; flex-direction: column; gap: .15rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1rem; }
+.tile-label { color: var(--muted); font-size: .8rem; }
+.tile strong { font-family: var(--font-display); font-size: 1.6rem; line-height: 1.2; }
+.tile-sub { color: var(--muted); font-size: .78rem; }
+
+.day-detail { margin: 0; padding: .5rem .8rem; border-radius: var(--radius-sm); background: var(--ink-soft); font-size: .9rem; }
+
+.chart-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; margin-bottom: .6rem; }
+.chart-title { font-size: 1rem; font-weight: 650; margin: 0; }
+.chart-max { margin-left: auto; color: var(--muted); font-size: .78rem; font-family: var(--mono); }
+.legend { display: flex; gap: .9rem; list-style: none; margin: 0; padding: 0; font-size: .8rem; color: var(--muted); }
+.legend li { display: inline-flex; align-items: center; gap: .35rem; }
+.swatch { width: .7rem; height: .7rem; border-radius: 3px; }
+
+.bars { display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 2px; height: 160px; align-items: end; border-bottom: 1px solid var(--border); }
+.col { height: 100%; display: flex; flex-direction: column-reverse; gap: 2px; padding: 0; border: 0; background: transparent; border-radius: 4px 4px 0 0; cursor: pointer; }
+.col:hover, .col.sel { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.col:focus-visible { outline: 2px solid var(--focus); }
+.seg-bar { display: block; width: 100%; min-height: 2px; }
+.seg-bar:last-child { border-radius: 4px 4px 0 0; }
+.axis { display: flex; justify-content: space-between; color: var(--muted); font-size: .75rem; margin-top: .3rem; }
+
+.s1 { background: var(--s1); }
+.s2 { background: var(--s2); }
+.bad { background: var(--bad); }
+
+.table-wrap { overflow-x: auto; }
+.stats-table { font-size: .88rem; --bs-table-bg: transparent; }
+.stats-table th { color: var(--muted); font-weight: 600; font-size: .78rem; white-space: nowrap; }
+.stats-table td, .stats-table th { padding: .5rem .8rem; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mono { font-family: var(--mono); font-size: .82rem; }
+.share { width: 20%; min-width: 80px; }
+.share span { display: block; height: 8px; border-radius: 4px; background: var(--s1); }
+
+.hbar { display: grid; grid-template-columns: 6.5rem 1fr 3rem; align-items: center; gap: .6rem; padding: .25rem 0; font-size: .88rem; }
+.hbar-track { height: 10px; }
+.hbar-track span { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbar-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+.err-row { padding: .7rem 1rem; border-top: 1px solid var(--border); }
+.err-row:first-child { border-top: 0; }
+.err-meta { font-size: .82rem; color: var(--muted); }
+.err-meta strong { color: var(--text); }
+.err-icon { color: var(--danger); }
+.err-text { font-family: var(--mono); font-size: .8rem; white-space: pre-wrap; word-break: break-word; margin-top: .2rem; }

@@ -6,26 +6,26 @@
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
-<PageTitle>@(Direct ? "Messaggi" : "Attività") · AgentWeb</PageTitle>
+<PageTitle>@T(Direct ? "nav.messages" : "nav.activity") · AgentWeb</PageTitle>
 
 @* Inbox a due colonne: a sinistra le conversazioni che ti riguardano (canali e thread), a destra quella aperta, con risposta diretta.
    Su /messages la stessa inbox mostra solo i messaggi diretti (con persone o agenti) e permette di iniziarne uno nuovo. *@
 <div class="activity @(selected is null ? "" : "has-selection")">
-    <section class="inbox" aria-label="@(Direct ? "Messaggi" : "Attività")">
+    <section class="inbox" aria-label="@T(Direct ? "nav.messages" : "nav.activity")">
         <header class="inbox-head">
-            <h2>@(Direct ? "Messaggi" : "Attività")</h2>
-            <span class="inbox-count">@(Direct ? "" : $"{Running.Count} in corso · ")@Visible.Sum(f => f.Unread) non letti</span>
+            <h2>@T(Direct ? "nav.messages" : "nav.activity")</h2>
+            <span class="inbox-count">@(Direct ? "" : T("act.running", Running.Count) + " · ")@T("act.unread", Visible.Sum(f => f.Unread))</span>
         </header>
         @if (Direct)
         {
             <form class="inbox-tools new-dm" @onsubmit="StartDirectAsync">
-                <input class="form-control form-control-sm" list="dm-people" placeholder="Scrivi a… (email o agente)" aria-label="Nuovo messaggio a"
+                <input class="form-control form-control-sm" list="dm-people" placeholder="@T("act.writeTo")" aria-label="@T("act.newMessageTo")"
                        @bind="newWith" @bind:event="oninput" />
                 <datalist id="dm-people">
-                    @foreach (var a in agents) { <option value="@a">agente</option> }
+                    @foreach (var a in agents) { <option value="@a">@T("log.agentTag")</option> }
                     @foreach (var p in people) { <option value="@p"></option> }
                 </datalist>
-                <button class="btn btn-primary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newWith)">Nuovo</button>
+                <button class="btn btn-primary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newWith)">@T("act.new")</button>
             </form>
         }
         else
@@ -33,12 +33,12 @@
         <div class="inbox-tools">
             <label class="filter">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
-                <select @bind="filter" aria-label="Filtra">
-                    <option value="all">Tutto</option>
-                    <option value="unread">Non letti</option>
+                <select @bind="filter" aria-label="@T("act.filter")">
+                    <option value="all">@T("log.all")</option>
+                    <option value="unread">@T("act.unreadFilter")</option>
                     <option value="threads">Thread</option>
-                    <option value="channels">Canali</option>
-                    <option value="agents">Agenti</option>
+                    <option value="channels">@T("nav.channels")</option>
+                    <option value="agents">@T("settings.agents")</option>
                 </select>
             </label>
         </div>
@@ -46,32 +46,32 @@
         @if (error is not null) { <div class="alert alert-danger py-2 mx-3" role="alert">@error</div> }
 
         <div class="inbox-list">
-            @if (loading) { <p class="text-muted px-3">Caricamento…</p> }
+            @if (loading) { <p class="text-muted px-3">@T("common.loading")</p> }
             @if (!Direct && filter is "all" or "agents" && Running.Count > 0)
             {
-                <div class="day">In corso</div>
+                <div class="day">@T("task.status.InProgress")</div>
                 @foreach (var r in Running)
                 {
                     <button class="item" @onclick="() => Open(r.ChannelId, null)">
                         <span class="item-icon">@AgentAvatar(r.Agent, "2.25rem")<span class="pulse" aria-hidden="true"></span></span>
                         <span class="item-body">
                             <span class="item-title">@r.Agent</span>
-                            <span class="item-preview">@Kind(r.Kind) in #@r.Channel · da @Since(r.StartedAt)</span>
+                            <span class="item-preview">@Kind(r.Kind) @T("log.in") #@r.Channel · @T("log.for", Since(r.StartedAt))</span>
                         </span>
                     </button>
                 }
             }
             @if (!Direct && filter == "agents")
             {
-                <div class="day">Appena terminati</div>
-                @if (activity?.Recent.Count is null or 0) { <p class="text-muted px-3 small">Ancora niente da quando il server è partito.</p> }
+                <div class="day">@T("act.justFinished")</div>
+                @if (activity?.Recent.Count is null or 0) { <p class="text-muted px-3 small">@T("act.nothingYet")</p> }
                 @foreach (var r in activity?.Recent ?? [])
                 {
                     <button class="item @(r.Error is null ? "" : "failed")" @onclick="() => Open(r.ChannelId, null)">
                         <span class="item-icon">@AgentAvatar(r.Agent, "2.25rem")</span>
                         <span class="item-body">
-                            <span class="item-title">@r.Agent <span class="item-tag">@(r.Error is null ? "✓" : "✕ errore")</span></span>
-                            <span class="item-preview">@(r.Error ?? $"{Kind(r.Kind)} in #{r.Channel} · {r.Seconds:0.0} s")</span>
+                            <span class="item-title">@r.Agent <span class="item-tag">@(r.Error is null ? "✓" : "✕ " + T("act.error"))</span></span>
+                            <span class="item-preview">@(r.Error ?? $"{Kind(r.Kind)} {T("log.in")} #{r.Channel} · {r.Seconds:0.0} s")</span>
                         </span>
                         <time>@r.StartedAt.ToLocalTime().ToString("HH:mm")</time>
                     </button>
@@ -79,7 +79,7 @@
             }
             else
             {
-                @if (!loading && Visible.Count == 0) { <p class="text-muted px-3 small">Niente da mostrare qui.</p> }
+                @if (!loading && Visible.Count == 0) { <p class="text-muted px-3 small">@T("act.nothingHere")</p> }
                 @foreach (var day in Visible.GroupBy(f => f.Last.At.ToLocalTime().Date))
                 {
                     <div class="day">@DayLabel(day.Key)</div>
@@ -118,12 +118,12 @@
         </div>
     </section>
 
-    <section class="conversation" aria-label="Conversazione">
+    <section class="conversation" aria-label="@T("act.conversation")">
         @if (selected is not { } sel)
         {
             <div class="empty">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
-                <p>@(Direct ? "Scegli una conversazione o scrivi a qualcuno." : "Scegli una conversazione a sinistra.")</p>
+                <p>@T(Direct ? "act.pickOrWrite" : "act.pick")</p>
             </div>
         }
         else
@@ -134,14 +134,14 @@
             var label = Title(channelName, with);
             var people = conversation.Where(m => m.Kind != AuthorKind.System).Select(m => (m.Author, m.Kind)).Distinct().ToList();
             <header class="conv-head">
-                <button class="btn btn-icon conv-back" aria-label="Torna all'elenco" @onclick="Close">
+                <button class="btn btn-icon conv-back" aria-label="@T("act.back")" @onclick="Close">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
                 </button>
                 <div class="conv-title">
                     <strong>@(sel.RootId is not null && conversation.FirstOrDefault() is { } root ? $"{Name(root.Author)}: {Short(root.Text, 90)}" : label)</strong>
                     <span class="conv-meta">
                         @if (with is null) { <a href="channels/@sel.ChannelId">#@channelName</a> }
-                        else { <span>@(agents.Contains(with) ? "Messaggio diretto con un agente" : "Messaggio diretto")</span> }
+                        else { <span>@T(agents.Contains(with) ? "act.dmAgent" : "act.dm")</span> }
                         @if (sel.RootId is not null) { <span> · @(conversation.Count - 1) risposte</span> }
                     </span>
                 </div>
@@ -153,7 +153,8 @@
                     }
                     @if (people.Count > 3) { <span class="people-more">+@(people.Count - 3)</span> }
                 </span>
-                <button class="btn btn-icon" aria-label="Chiudi" @onclick="Close">
+                @if (sel.RootId is null) { <NotifySelect ChannelId="sel.ChannelId" /> }
+                <button class="btn btn-icon" aria-label="@T("app.close")" @onclick="Close">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
                 </button>
             </header>
@@ -184,7 +185,7 @@
                                 {
                                     <div class="msg-head">
                                         <strong>@Name(m.Author)</strong>
-                                        @if (m.Kind == AuthorKind.Agent) { <span class="item-tag">agente</span> }
+                                        @if (m.Kind == AuthorKind.Agent) { <span class="item-tag">@T("log.agentTag")</span> }
                                         <time>@m.At.ToLocalTime().ToString("dd/MM HH:mm")</time>
                                     </div>
                                 }
@@ -197,8 +198,8 @@
 
             <form class="conv-composer" @onsubmit="SendAsync">
                 <textarea @ref="composer" rows="1" maxlength="4000" @bind="draft" @bind:event="oninput"
-                          placeholder="@(sel.RootId is not null ? "Rispondi nel thread" : with is null ? $"Scrivi in #{channelName}" : $"Scrivi a {Name(with)}")" aria-label="Messaggio"></textarea>
-                <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="Invia">
+                          placeholder="@(sel.RootId is not null ? T("chat.replyThread") : with is null ? T("chat.writeIn", channelName) : T("chat.writeTo", Name(with)))" aria-label="@T("chat.message")"></textarea>
+                <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="@T("chat.send")">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                 </button>
             </form>
@@ -357,17 +358,14 @@
     bool IsSelected(FeedItemDto f) => selected is { } s && s.ChannelId == f.ChannelId && s.RootId == f.Root?.Id;
     static string Key(FeedItemDto f) => f.Root is { } r ? $"t{r.Id}" : $"c{f.ChannelId}";
 
-    static readonly string[] Days = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
-    static readonly string[] Months = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
-
     static string DayLabel(DateTime d)
     {
         var today = DateTime.Now.Date;
-        return d == today ? "Oggi" : d == today.AddDays(-1) ? "Ieri"
-            : $"{Days[(int)d.DayOfWeek]} {d.Day} {Months[d.Month - 1]}{(d.Year == today.Year ? "" : $" {d.Year}")}";
+        return d == today ? T("date.today") : d == today.AddDays(-1) ? T("date.yesterday")
+            : $"{T("date.days").Split(',')[(int)d.DayOfWeek]} {d.Day} {T("date.months").Split(',')[d.Month - 1]}{(d.Year == today.Year ? "" : $" {d.Year}")}";
     }
 
-    static string Kind(string kind) => kind == "task" ? "lavora a un task" : "risponde";
+    static string Kind(string kind) => T(kind == "task" ? "act.workingOnTask" : "act.replying");
 
     static string Since(DateTimeOffset t)
     {
