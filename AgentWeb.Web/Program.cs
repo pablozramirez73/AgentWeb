@@ -23,10 +23,15 @@ AgentWeb.Shared.Lang.Use(builder.Configuration["Language"]); // lingua dell'inst
 if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
     builder.Services.AddOpenTelemetry()
         .ConfigureResource(r => r.AddService(builder.Configuration["OTEL_SERVICE_NAME"] ?? "agentweb"))
-        .WithTracing(t => t
-            .AddSource(AgentWeb.Web.AgentActivity.Name, "Npgsql")
-            .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/healthz"))
-            .AddHttpClientInstrumentation())
+        .WithTracing(t =>
+        {
+            t.AddSource(AgentWeb.Web.AgentActivity.Name, "Npgsql")
+                .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/healthz"))
+                .AddHttpClientInstrumentation();
+            // Span profiles: ogni span porta il suo profilo CPU, in Grafana Tempo → "Profiles for this span".
+            // Solo col profiler nativo caricato (immagine Docker con PYROSCOPE_PROFILING_ENABLED=1), non in sviluppo su macOS.
+            if (builder.Configuration["PYROSCOPE_PROFILING_ENABLED"] == "1") t.AddProcessor(new Pyroscope.OpenTelemetry.PyroscopeSpanProcessor());
+        })
         .WithMetrics(m => m
             .AddMeter(AgentWeb.Web.AgentActivity.Name, "Npgsql")
             .AddAspNetCoreInstrumentation()
@@ -111,6 +116,7 @@ builder.Services.AddSingleton<LlmClients>();
 builder.Services.AddSingleton<AgentIcons>();
 builder.Services.AddSingleton<MemoryStore>();   // memoria semantica (pgvector + embedding locale)
 builder.Services.AddSingleton<SafeFetch>();     // fetch_url sicuro per gli agenti
+builder.Services.AddSingleton(sp => { var s = sp.GetRequiredService<AgentSettingsStore>(); return new AgentFiles(s.FilesRoot, s.AllowExecute); });
 builder.Services.AddSingleton<NativeTools>();
 builder.Services.AddSingleton<AGUI.Formatting.IAGUIEventStreamFormatter, AGUI.Formatting.SseEventStreamFormatter>();
 builder.Services.AddScoped<IChatClient>(sp => new DebateChatClient(sp.GetRequiredService<LlmClients>(), sp.GetRequiredService<AgentSettingsStore>()));

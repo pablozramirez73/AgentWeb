@@ -204,7 +204,9 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             g.Count(r => r.Kind == "delega"), g.Sum(r => r.InputTokens), g.Sum(r => r.OutputTokens))).ToListAsync();
         // @nome seguito da un carattere che non può stare in un nome (come MentionRegex): @Ricercatore non trova @RicercatoreSenior.
         var name = Regex.Escape(agent);
-        string mention = $"@{name}([^[:alnum:]_-]|$)", asked = T("agent.asks", name, "").TrimEnd();
+        // Deleghe ("→ chiedo a X:"): in ogni lingua, perché restano salvate in quella attiva quando sono state scritte.
+        string mention = $"@{name}([^[:alnum:]_-]|$)",
+            asked = string.Join("|", Every("agent.asks").Select(t => Regex.Escape(string.Format(t, "\u0001", "").TrimEnd()).Replace("\u0001", name)));
         var messages = await db.Messages
             .Where(m => m.At >= since && ids.Contains(m.ChannelId) && m.Kind != AuthorKind.System
                 && (m.Author == agent || Regex.IsMatch(m.Text, mention, RegexOptions.IgnoreCase) || Regex.IsMatch(m.Text, asked, RegexOptions.IgnoreCase)))

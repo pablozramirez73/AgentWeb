@@ -30,10 +30,28 @@ public sealed class RemoteUserSession(HttpClient anonymous, ITokenStore store) :
     {
         refresh = await store.GetAsync("refresh");
         UserName = await store.GetAsync("user");
-        // App: la lingua la decide il server; senza rete resta quella dell'ultima volta.
-        try { Lang.Use(await anonymous.GetStringAsync("language")); await store.SetAsync("lang", Lang.Code); }
-        catch (HttpRequestException) { Lang.Use(await store.GetAsync("lang")); }
-        catch (TaskCanceledException) { Lang.Use(await store.GetAsync("lang")); }
+        // App: la lingua la decide il server. Si usa subito quella salvata e la si aggiorna in background (vale dal prossimo
+        // avvio); si aspetta il server solo al primo avvio, quando non c'è niente di salvato. Una richiesta per sessione.
+        var saved = await store.GetAsync("lang");
+        Lang.Use(saved);
+        languageFetch ??= FetchLanguageAsync(applyNow: saved is null);
+        if (saved is null) await languageFetch;
+    }
+
+    Task? languageFetch;
+
+    async Task FetchLanguageAsync(bool applyNow)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var code = (await anonymous.GetStringAsync("language", cts.Token)).Trim();
+            if (!Lang.All.ContainsKey(code)) return;
+            if (applyNow) Lang.Use(code);
+            await store.SetAsync("lang", code);
+        }
+        catch (HttpRequestException) { } // senza rete resta quella salvata (o l'italiano)
+        catch (OperationCanceledException) { }
     }
 
     public async Task<string?> LoginAsync(string email, string password, string? code = null)

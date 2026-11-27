@@ -24,6 +24,9 @@ public static class Lang
     public static string T(string key) => current.TryGetValue(key, out var s) || All[Default].TryGetValue(key, out s) ? s : key;
     public static string T(string key, params object?[] args) => string.Format(T(key), args);
 
+    // Lo stesso testo in tutte le lingue: per riconoscere messaggi salvati prima di un cambio di lingua.
+    public static IEnumerable<string> Every(string key) => All.Values.Select(t => t.TryGetValue(key, out var s) ? s : All[Default][key]).Distinct();
+
     static Dictionary<string, IReadOnlyDictionary<string, string>> Load()
     {
         var asm = typeof(Lang).Assembly;

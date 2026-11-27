@@ -25,7 +25,7 @@
         @Filter(T("tasks.status"), "◷", statusFilter, Columns.Select(c => (c.Status.ToString(), c.Label)).Append((WorkStatus.Failed.ToString(), Label(WorkStatus.Failed))))
         @Filter(T("tasks.createdBy"), "✎", creatorFilter, tasks.Select(t => t.CreatedBy).Distinct().Order().Select(u => (u, Name(u))))
         @Filter(T("tasks.assignedTo"), "@", assigneeFilter, tasks.Select(t => t.Assignee ?? "").Distinct().Order().Select(u => (u, u == "" ? T("tasks.nobody") : Name(u))))
-        @if (Filtering) { <button class="btn btn-link clear" @onclick="ClearFilters">Azzera</button> }
+        @if (Filtering) { <button class="btn btn-link clear" @onclick="ClearFilters">@T("tasks.clear")</button> }
         <span class="spacer"></span>
         <label class="sort">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4" /></svg>

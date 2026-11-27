@@ -30,7 +30,7 @@ else
                 </span>
                 <div class="session-body">
                     <div class="session-title">@Title(s) @if (s.Current) { <span class="badge bg-success ms-1">@T("devices.thisOne")</span> }</div>
-                    <div class="session-meta">@Kind(s.Kind) · @T("devices.since", s.CreatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm"))</div>
+                    <div class="session-meta">@Kind(s.Kind) · @T("devices.since", Since(s.CreatedAt.ToLocalTime()))</div>
                 </div>
                 <button class="btn btn-sm btn-outline-danger" @onclick="() => RevokeAsync(s)">@T(s.Current ? "nav.signOut" : "devices.revoke")</button>
             </li>
@@ -87,6 +87,8 @@ else
 </SettingsShell>
 
 @code {
+    // Mese dai file di lingua, non dalla cultura del browser: il testo intorno è nella lingua dell'installazione.
+    static string Since(DateTimeOffset d) => $"{d.Day} {T("stats.months").Split(',')[d.Month - 1]} {d.Year}, {d:HH:mm}";
     // Persistito dal prerender: il browser non richiede di nuovo l'elenco appena caricato sul server.
     [PersistentState] public List<SessionDto>? Sessions { get; set; }
     string? error;

@@ -112,7 +112,7 @@ public static class AgentApi
         settings.MapGet("", (AgentSettingsStore store) => store.GetAsync());
         settings.MapPut("", (AgentSettings body, AgentSettingsStore store) =>
         {
-            var errors = body.Validate(store.AllowStdio);
+            var errors = body.Validate(store.AllowStdio, store.AllowExecute);
             if (errors.Count > 0) return Results.Text(string.Join("\n", errors), statusCode: 400);
             store.Save(body);
             return Results.NoContent();

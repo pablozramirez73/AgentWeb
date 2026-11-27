@@ -120,7 +120,8 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         [LDescription("mcp.create_agent.like")] string? like = null,
         [LDescription("mcp.create_agent.model")] string? model = null,
         [LDescription("mcp.create_agent.protocol")] string protocol = AgentProtocols.Internal,
-        [LDescription("mcp.create_agent.channel")] string? channel = null) => Run(async () =>
+        [LDescription("mcp.create_agent.channel")] string? channel = null,
+        [LDescription("mcp.create_agent.files")] string? files = null) => Run(async () =>
     {
         RequireAdmin("mcp.admin.createAgents");
         var s = settings.Get();
@@ -130,7 +131,7 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         var src = source.Llm;
         s.LocalAgents.Add(new()
         {
-            Name = name.Trim().TrimStart('@'), Prompt = purpose.Trim(), Protocol = protocol, Tools = [.. AgentTools.Defaults],
+            Name = name.Trim().TrimStart('@'), Prompt = purpose.Trim(), Protocol = protocol, Tools = [.. AgentTools.Defaults], Files = Rules(files ?? ""),
             Llm = new() { Kind = src.Kind, Url = src.Url, ApiKey = src.ApiKey, DefaultModel = string.IsNullOrWhiteSpace(model) ? src.DefaultModel : model.Trim() },
         });
         SaveSettings(s);
@@ -167,7 +168,8 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         [LDescription("mcp.update_agent.purpose")] string? purpose = null,
         [LDescription("mcp.update_agent.model")] string? model = null,
         [LDescription("mcp.update_agent.protocol")] string? protocol = null,
-        [LDescription("mcp.update_agent.enabled")] bool? enabled = null) => Run(async () =>
+        [LDescription("mcp.update_agent.enabled")] bool? enabled = null,
+        [LDescription("mcp.update_agent.files")] string? files = null) => Run(async () =>
     {
         RequireAdmin("mcp.admin.updateAgents");
         var s = settings.Get();
@@ -178,6 +180,7 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         if (!string.IsNullOrWhiteSpace(model)) a.Llm.DefaultModel = model.Trim();
         if (protocol is not null) a.Protocol = protocol;
         if (enabled is { } e) a.Enabled = e;
+        if (files is not null) a.Files = Rules(files);
         SaveSettings(s);
         await Task.CompletedTask;
         return T("mcp.agentUpdated", a.Name, a.Llm.DefaultModel, a.Protocol, T(a.Enabled ? "mcp.enabled" : "mcp.disabled"));
@@ -212,10 +215,16 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         return T("mcp.a2aDisconnected", name.TrimStart('@'));
     });
 
+    static List<FileRule> Rules(string text)
+    {
+        try { return FileRule.ParseList(text); }
+        catch (FormatException ex) { throw new McpException(ex.Message); }
+    }
+
     // shortcut: legge e riscrive le impostazioni intere; un salvataggio contemporaneo dalla pagina Agenti può sovrascriverlo.
     void SaveSettings(AgentSettings s)
     {
-        if (s.Validate(settings.AllowStdio) is { Count: > 0 } errors) throw new McpException(string.Join(" ", errors));
+        if (s.Validate(settings.AllowStdio, settings.AllowExecute) is { Count: > 0 } errors) throw new McpException(string.Join(" ", errors));
         settings.Save(s);
     }
 

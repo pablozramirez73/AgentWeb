@@ -209,11 +209,15 @@ public static class Daemon
     {
         var args = new[] { exe, "daemon" }.Concat(daemonArgs).ToList();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        // Il servizio non eredita l'ambiente della shell: profilo e lingua vanno scritti nel file.
+        var vars = new List<(string Key, string Value)>();
+        if (configDir is not null) vars.Add(("AGENTWEB_CONFIG_DIR", configDir));
+        if (Code != Default) vars.Add(("AGENTWEB_LANG", Code));
         if (OperatingSystem.IsMacOS())
         {
             var path = Path.Combine(home, "Library", "LaunchAgents", "it.agentweb.daemon.plist");
             static string X(string s) => System.Security.SecurityElement.Escape(s);
-            var env = configDir is null ? "" : $"<key>EnvironmentVariables</key><dict><key>AGENTWEB_CONFIG_DIR</key><string>{X(configDir)}</string></dict>";
+            var env = vars.Count == 0 ? "" : $"<key>EnvironmentVariables</key><dict>{string.Concat(vars.Select(v => $"<key>{v.Key}</key><string>{X(v.Value)}</string>"))}</dict>";
             return (path, $"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -235,7 +239,7 @@ public static class Daemon
                 Description=AgentWeb daemon
                 [Service]
                 ExecStart={string.Join(' ', args.Select(Q))}
-                {(configDir is null ? "" : $"Environment=AGENTWEB_CONFIG_DIR={Q(configDir)}")}
+                {string.Join("\n", vars.Select(v => $"Environment={v.Key}={Q(v.Value)}"))}
                 Restart=on-failure
                 [Install]
                 WantedBy=default.target

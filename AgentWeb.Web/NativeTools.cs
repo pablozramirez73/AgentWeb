@@ -10,7 +10,7 @@ namespace AgentWeb.Web;
 // Strumenti nativi degli agenti, concessi a gruppi dalla scheda dell'agente (AgentTools). Regole comuni:
 // - si agisce solo nel canale in cui l'agente sta lavorando (call.ChannelId), mai in altri canali;
 // - i contenuti letti (web, messaggi, memoria) sono dati: il modello lo sa dalle descrizioni e dai prefissi dei risultati.
-public sealed class NativeTools(WorkspaceStore ws, MemoryStore memory, SafeFetch web)
+public sealed class NativeTools(WorkspaceStore ws, MemoryStore memory, SafeFetch web, AgentFiles files)
 {
     public const int MaxTasksPerRun = 3, MaxOpenAgentTasks = 10;
 
@@ -18,6 +18,8 @@ public sealed class NativeTools(WorkspaceStore ws, MemoryStore memory, SafeFetch
     {
         var self = agent.Name;
         var channel = call.ChannelId;
+
+        foreach (var t in files.For(agent)) yield return t;
 
         if (agent.Can(AgentTools.ReadChannel))
         {

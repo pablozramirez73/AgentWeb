@@ -109,7 +109,7 @@
                         {
                             var m = hit.Message;
                             var mine = m.Author == agent;
-                            <div class="entry msg @(mine ? "mine" : "") @(m.Text.StartsWith(Asks) ? "delegation" : "")">
+                            <div class="entry msg @(mine ? "mine" : "") @(Asks.Any(m.Text.StartsWith) ? "delegation" : "")">
                                 <div class="entry-meta">
                                     <span class="entry-icon" aria-hidden="true">@(m.Kind == AuthorKind.Agent ? "✦" : "●")</span>
                                     <strong>@m.Author</strong> @if (m.Kind == AuthorKind.Agent && !mine) { <span class="item-tag">@T("log.agentTag")</span> }
@@ -129,7 +129,8 @@
     static readonly int[] Periods = [1, 7, 30];
     static (string Key, string Label)[] Shows => [("all", T("log.all")), ("runs", T("stats.runs")), ("messages", T("nav.messages"))];
     // Le deleghe scritte dagli agenti iniziano così (stessa chiave usata dal server in WorkspaceStore).
-    static string Asks => T("agent.asks", "\u0001", "").Split('\u0001')[0]; // "→ chiedo a "
+    // "→ chiedo a ", "→ asking ": i messaggi restano nella lingua in cui sono stati scritti.
+    static readonly string[] Asks = Every("agent.asks").Select(t => t.Split("{0}")[0]).ToArray();
     int days = 7;
     string show = "all";
     List<string>? agents;

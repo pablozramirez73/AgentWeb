@@ -22,7 +22,7 @@ public sealed class BrowserPush(IJSRuntime js) : IDevicePush, IAsyncDisposable
     public string Kind => "web";
     public async Task<bool> SupportedAsync() => await (await Module()).InvokeAsync<bool>("supported");
     public async Task<PushDeviceRequest?> CurrentAsync() => await (await Module()).InvokeAsync<PushDeviceRequest?>("current");
-    public async Task<PushDeviceRequest?> SubscribeAsync(PushConfigDto config) => await (await Module()).InvokeAsync<PushDeviceRequest?>("subscribe", config.VapidPublicKey);
+    public async Task<PushDeviceRequest?> SubscribeAsync(PushConfigDto config) => await (await Module()).InvokeAsync<PushDeviceRequest?>("subscribe", config.VapidPublicKey, Lang.T("push.swTimeout"));
     public async Task UnsubscribeAsync() => await (await Module()).InvokeVoidAsync("unsubscribe");
 
     public async ValueTask DisposeAsync()

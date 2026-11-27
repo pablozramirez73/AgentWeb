@@ -18,12 +18,44 @@ public sealed class LocalAgentConfig
 
     public bool Can(string tool) => Tools?.Contains(tool, StringComparer.OrdinalIgnoreCase) == true;
 
+    // Diritti sui file della sua cartella sul server (AgentFiles): salvati con l'agente, nello stesso file e nella stessa scrittura.
+    public List<FileRule> Files { get; set; } = [];
+
     // Utente sul cui computer gira l'agente (LLM "daemon"), altrimenti null.
     [JsonIgnore] public string? DaemonOwner => Llm.Kind == LlmKinds.Daemon ? Llm.Url.Trim() : null;
 
     // Solo per leggere le impostazioni della versione con i provider separati (vedi AgentSettings.Normalize).
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Provider { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Model { get; set; }
+}
+
+// Diritto di un agente su una parte della sua cartella. Path relativo alla cartella: * = un livello, ** = qualsiasi
+// profondità; un percorso senza * vale anche per tutto ciò che contiene (docs = docs e docs/**).
+public sealed class FileRule
+{
+    public string Path { get; set; } = "";
+    public bool Read { get; set; }
+    public bool Write { get; set; }
+    public bool Execute { get; set; }
+
+    public override string ToString() => $"{Path}={(Read ? "r" : "")}{(Write ? "w" : "")}{(Execute ? "x" : "")}";
+
+    // Relativo e dentro la cartella: niente assoluti, "..", \ o : (unità Windows).
+    public static bool IsValidPath(string p) =>
+        p.Length is > 0 and <= 260 && !p.StartsWith('/') && !p.Contains('\\') && !p.Contains(':') && !p.Any(char.IsControl)
+        && p.Split('/').All(s => s != "..");
+
+    // Formato testuale per MCP: "docs/**=r; out/**=rw; run.sh=x".
+    public static List<FileRule> ParseList(string text) =>
+        [.. text.Split([';', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Parse)];
+
+    static FileRule Parse(string s)
+    {
+        var eq = s.LastIndexOf('=');
+        var flags = eq < 0 ? "" : s[(eq + 1)..].Trim().ToLowerInvariant();
+        if (eq <= 0 || flags.Length == 0 || flags.Any(c => c is not ('r' or 'w' or 'x'))) throw new FormatException(T("val.fileRule", s));
+        return new() { Path = s[..eq].Trim(), Read = flags.Contains('r'), Write = flags.Contains('w'), Execute = flags.Contains('x') };
+    }
 }
 
 // Gruppi di strumenti nativi che un agente può usare (si scelgono nella sua scheda, insieme ai server MCP).
@@ -152,7 +184,7 @@ public sealed partial class AgentSettings
     public LocalAgentConfig? FindLocal(string name) =>
         LocalAgents.FirstOrDefault(a => a.Enabled && a.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
-    public List<string> Validate(bool allowStdio)
+    public List<string> Validate(bool allowStdio, bool allowExecute = false)
     {
         var errors = new List<string>();
         foreach (var a in LocalAgents.Where(a => a.Enabled))
@@ -170,6 +202,13 @@ public sealed partial class AgentSettings
                 if (t.StartsWith(AgentTools.McpPrefix) ? McpServers.All(m => !m.Name.Equals(t[AgentTools.McpPrefix.Length..], StringComparison.OrdinalIgnoreCase))
                                                        : AgentTools.Native.All(n => n.Id != t))
                     errors.Add(T("val.tool", a.Name, t));
+            }
+            if (a.Files.Count > 0 && a.DaemonOwner is not null) errors.Add(T("val.filesDaemon", a.Name));
+            foreach (var r in a.Files)
+            {
+                if (!FileRule.IsValidPath(r.Path)) errors.Add(T("val.filePath", a.Name, r.Path));
+                else if (!(r.Read || r.Write || r.Execute)) errors.Add(T("val.fileFlags", a.Name, r.Path));
+                if (r.Execute && !allowExecute) errors.Add(T("val.fileExecute", a.Name, r.Path));
             }
         }
         void Names(IEnumerable<string> names, string kind)
@@ -217,7 +256,7 @@ public sealed partial class AgentSettings
 }
 
 
-public sealed record AgentSettingsView(AgentSettings Settings, bool AllowStdio);
+public sealed record AgentSettingsView(AgentSettings Settings, bool AllowStdio, bool AllowExecute = false);
 
 // Implementata in locale dal server web e via HTTP dall'app MAUI: le pagine non sanno dove gira la logica.
 public interface IAgentSettingsService

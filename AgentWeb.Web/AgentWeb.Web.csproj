@@ -44,6 +44,9 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.21.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.21.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.21.0" />
+    <!-- Span profiles: lega tracce e profili Pyroscope. Pyroscope = stessa versione del profiler nativo nel Dockerfile. -->
+    <PackageReference Include="Pyroscope" Version="1.5.1" />
+    <PackageReference Include="Pyroscope.OpenTelemetry" Version="0.5.1" />
   </ItemGroup>
 
 </Project>
