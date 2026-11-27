@@ -96,6 +96,7 @@ public sealed class AgentFiles(string root, bool allowExecute)
         catch (OperationCanceledException)
         {
             p.Kill(entireProcessTree: true);
+            ct.ThrowIfCancellationRequested(); // run dell'agente annullato: non è un timeout
             return T("files.timeout", path, (int)RunTimeout.TotalSeconds) + "\n" + Cut(output);
         }
         p.WaitForExit(); // svuota gli ultimi eventi di output
@@ -108,8 +109,8 @@ public sealed class AgentFiles(string root, bool allowExecute)
 
     (string? Error, bool Ok) Check(LocalAgentConfig agent, string path, Func<FileRule, bool> right, string op)
     {
-        path = path.Trim();
-        if (path.Contains('*') || !FileRule.IsValidPath(path) || Resolve(Dir(agent), path) is null) return (T("files.badPath", path), false);
+        // Il percorso controllato è quello che si apre: niente spazi ai bordi da togliere di nascosto.
+        if (path != path.Trim() || path.Contains('*') || !FileRule.IsValidPath(path) || Resolve(Dir(agent), path) is null) return (T("files.badPath", path), false);
         return Allowed(agent, path, right) ? (null, true) : (T("files.denied", path, T(op)), false);
     }
 

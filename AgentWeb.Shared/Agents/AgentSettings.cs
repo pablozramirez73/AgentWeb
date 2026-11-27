@@ -172,6 +172,7 @@ public sealed partial class AgentSettings
             }
             a.Llm.Name = a.Name;
             // Agenti salvati prima dei permessi: tengono ciò che avevano (collaborazione e tutti i server MCP) più lettura e memoria.
+            a.Files ??= []; // agenti salvati prima dei diritti sui file, o file modificato a mano
             a.Tools ??= [.. AgentTools.Defaults, .. McpServers.Select(m => AgentTools.McpPrefix + m.Name)];
             if (AgentProtocols.All.All(p => p.Value != a.Protocol)) a.Protocol = AgentProtocols.Internal;
             a.Provider = null;
@@ -203,10 +204,11 @@ public sealed partial class AgentSettings
                                                        : AgentTools.Native.All(n => n.Id != t))
                     errors.Add(T("val.tool", a.Name, t));
             }
+            a.Files ??= []; // corpo di una PUT con "Files": null
             if (a.Files.Count > 0 && a.DaemonOwner is not null) errors.Add(T("val.filesDaemon", a.Name));
             foreach (var r in a.Files)
             {
-                if (!FileRule.IsValidPath(r.Path)) errors.Add(T("val.filePath", a.Name, r.Path));
+                if (!FileRule.IsValidPath(r.Path ?? "")) errors.Add(T("val.filePath", a.Name, r.Path));
                 else if (!(r.Read || r.Write || r.Execute)) errors.Add(T("val.fileFlags", a.Name, r.Path));
                 if (r.Execute && !allowExecute) errors.Add(T("val.fileExecute", a.Name, r.Path));
             }

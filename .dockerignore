@@ -5,3 +5,4 @@
 codegraph.db*
 .claude
 AgentWeb.Web/agentsettings.json
+AgentWeb.Web/agentfiles

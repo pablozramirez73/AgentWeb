@@ -8,6 +8,12 @@
     <UserSecretsId>ac99dd0b-5dcd-443f-83aa-72b42573e0da</UserSecretsId>
   </PropertyGroup>
 
+  <!-- In sviluppo le cartelle degli agenti stanno nel progetto: i loro file non vanno mai compilati né pubblicati. -->
+  <ItemGroup>
+    <Compile Remove="agentfiles/**" />
+    <Content Remove="agentfiles/**" />
+    <None Remove="agentfiles/**" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\AgentWeb.Shared\AgentWeb.Shared.csproj" />
     <ProjectReference Include="..\AgentWeb.Web.Client\AgentWeb.Web.Client.csproj" />
