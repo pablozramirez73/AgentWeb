@@ -311,7 +311,7 @@
   "debate.a2aUnavailable": "A2A \"{0}\" unavailable: {1}",
   "debate.intro": "Give a topic: the enabled agents speak in turn, each with its own LLM, and answer each other.",
   "debate.pageTitle": "Debate between agents",
-  "debate.placeholder": "Give the agents a topic (e.g. design a resilient microservice)...",
+  "debate.placeholder": "Audit this code like a code audit manager team: 1) find bugs, race conditions and missing error handling; 2) flag security issues (input validation, auth, injection, secret handling); 3) evaluate performance and needless complexity; 4) propose concrete fixes with priority (critical/high/low). End with a verdict: APPROVE / NEEDS WORK / BLOCK.",
   "debate.prompt": "Discussion so far:\n{0}\nNow it's your turn, as {1}.",
   "debate.you": "You",
   "defaults.architect": "Architect",

@@ -311,7 +311,7 @@
   "debate.a2aUnavailable": "A2A \"{0}\" non disponibile: {1}",
   "debate.intro": "Dai un tema: gli agenti abilitati intervengono a turno, ognuno con il suo LLM, e si rispondono a vicenda.",
   "debate.pageTitle": "Dibattito tra agenti",
-  "debate.placeholder": "Dai un tema agli agenti (es. progettate un microservizio resiliente)...",
+  "debate.placeholder": "Auditate questo codice come farebbe un team di code audit manager: 1) individuate bug, race condition e gestione errori mancante; 2) segnalate problemi di sicurezza (input validation, auth, injection, gestione segreti); 3) valutate performance e complessità inutili; 4) proponete fix concreti con priorità (critico/alto/basso). Concludete con un verdetto: PROMETTO / DA RIVEDERE / BLOCCA.",
   "debate.prompt": "Discussione finora:\n{0}\nOra intervieni tu come {1}.",
   "debate.you": "Tu",
   "defaults.architect": "Architetto",
