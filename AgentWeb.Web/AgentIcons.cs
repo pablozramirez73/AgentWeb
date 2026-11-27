@@ -5,6 +5,8 @@ using System.Xml;
 using AgentWeb.Shared.Agents;
 using Microsoft.Extensions.AI;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Icona quadrata di ogni agente, disegnata dal suo stesso LLM la prima volta che serve (agente appena creato o mai disegnato):
@@ -37,10 +39,10 @@ public sealed class AgentIcons(IConfiguration config, IWebHostEnvironment env, L
         string svg;
         try
         {
-            if (agent.Llm.Kind == LlmKinds.Daemon) throw new InvalidOperationException("i daemon non disegnano");
+            if (agent.Llm.Kind == LlmKinds.Daemon) throw new InvalidOperationException(T("icon.daemon"));
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             var r = await llms.For(agent).GetResponseAsync([new(ChatRole.User, Prompt(agent))], new ChatOptions { MaxOutputTokens = 8192 }, cts.Token);
-            svg = Clean(r.Text) ?? throw new InvalidOperationException("risposta senza un SVG valido");
+            svg = Clean(r.Text) ?? throw new InvalidOperationException(T("icon.noSvg"));
         }
         catch (Exception ex)
         {
@@ -52,17 +54,7 @@ public sealed class AgentIcons(IConfiguration config, IWebHostEnvironment env, L
         File.Move(file + ".tmp", file, overwrite: true);
     }
 
-    static string Prompt(LocalAgentConfig a) => $"""
-        Disegna l'icona di un agente AI chiamato "{a.Name}". Il suo scopo: {a.Prompt}
-
-        Deve essere spettacolare (colori vivi, gradienti, forme pulite, stile sticker/app icon moderno)
-        ma anche satirica: una caricatura affettuosa del suo ruolo e dei suoi difetti tipici
-        (es. un revisore con la lente e l'aria di chi ha già deciso che è tutto sbagliato).
-        Leggibile anche a 24 pixel: un solo soggetto grande, niente testo piccolo.
-
-        Rispondi SOLO con un SVG: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">…</svg>,
-        quadrato, sfondo che riempie tutto, niente script, niente immagini o font esterni, massimo 30 KB.
-        """;
+    static string Prompt(LocalAgentConfig a) => T("icon.prompt", a.Name, a.Prompt);
 
     // Estrae l'<svg> dalla risposta e lo accetta solo se è XML valido, con radice svg e senza script né riferimenti esterni.
     public static string? Clean(string text)

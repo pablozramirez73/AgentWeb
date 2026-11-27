@@ -5,14 +5,14 @@
 @inject IWorkspaceClient Ws
 @inject IJSRuntime JS
 
-<PageTitle>@(current is null ? "Canali" : $"{(current.IsPrivate ? "🔒" : "#")} {current.Name} · AgentWeb")</PageTitle>
+<PageTitle>@(current is null ? T("nav.channels") : $"{(current.IsPrivate ? "🔒" : "#")} {current.Name} · AgentWeb")</PageTitle>
 
 <div class="workspace">
-    <aside class="channels" aria-label="Canali">
+    <aside class="channels" aria-label="@T("nav.channels")">
         <form class="search" role="search" @onsubmit="SearchAsync">
-            <input class="form-control form-control-sm" type="search" @bind="searchQuery" @bind:event="oninput" placeholder="Cerca nei messaggi" aria-label="Cerca nei messaggi" maxlength="200" />
+            <input class="form-control form-control-sm" type="search" @bind="searchQuery" @bind:event="oninput" placeholder="@T("ch.search")" aria-label="@T("ch.search")" maxlength="200" />
         </form>
-        <div class="channels-head">Canali</div>
+        <div class="channels-head">@T("nav.channels")</div>
         <ul class="channel-links">
             @foreach (var c in (ChannelList ?? []).Where(c => c.With is null)) @* i messaggi diretti stanno nella pagina Messaggi *@
             {
@@ -20,7 +20,7 @@
                     <a href="channels/@c.Id" class="channel-link @(c.Id == ChannelId ? "active" : "")" aria-current="@(c.Id == ChannelId ? "page" : null)">
                         @if (c.IsPrivate)
                         {
-                            <svg class="glyph" viewBox="0 0 24 24" aria-label="privato"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 1 1 8 0v3" /></svg>
+                            <svg class="glyph" viewBox="0 0 24 24" aria-label="@T("ch.privateTag")"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 1 1 8 0v3" /></svg>
                         }
                         else
                         {
@@ -29,18 +29,18 @@
                         <span>@c.Name</span>
                         @if (c.Unread > 0 && c.Id != ChannelId)
                         {
-                            <span class="count @(c.Mentions > 0 ? "count-mention" : "")" title="@(c.Mentions > 0 ? $"{c.Mentions} menzioni" : $"{c.Unread} non letti")">@(c.Mentions > 0 ? "@" + c.Mentions : c.Unread.ToString())</span>
+                            <span class="count @(c.Mentions > 0 ? "count-mention" : "")" title="@(c.Mentions > 0 ? T("ch.mentions", c.Mentions) : T("act.unread", c.Unread))">@(c.Mentions > 0 ? "@" + c.Mentions : c.Unread.ToString())</span>
                         }
                     </a>
                 </li>
             }
         </ul>
         <form @onsubmit="CreateChannelAsync" class="new-channel">
-            <input class="form-control form-control-sm" @bind="newChannel" @bind:event="oninput" placeholder="Nuovo canale" aria-label="Nome del nuovo canale" maxlength="50" />
-            <label class="private-toggle" title="Visibile solo ai membri">
-                <input type="checkbox" class="form-check-input" @bind="newPrivate" /> Privato
+            <input class="form-control form-control-sm" @bind="newChannel" @bind:event="oninput" placeholder="@T("ch.new")" aria-label="@T("ch.newName")" maxlength="50" />
+            <label class="private-toggle" title="@T("ch.membersOnly")">
+                <input type="checkbox" class="form-check-input" @bind="newPrivate" /> @T("ch.private")
             </label>
-            <button class="btn btn-outline-secondary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newChannel)">Crea</button>
+            <button class="btn btn-outline-secondary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newChannel)">@T("ch.create")</button>
         </form>
     </aside>
 
@@ -53,8 +53,8 @@
         @if (searchResults is not null)
         {
             <header class="channel-head">
-                <div class="channel-title"><h1 class="h3">Ricerca: «@searchedFor»</h1><p class="channel-meta">@searchResults.Count risultati nei canali che vedi</p></div>
-                <button class="btn btn-outline-secondary btn-sm" @onclick="() => searchResults = null">Chiudi</button>
+                <div class="channel-title"><h1 class="h3">@T("ch.searchFor", searchedFor)</h1><p class="channel-meta">@T("ch.results", searchResults.Count)</p></div>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => searchResults = null">@T("app.close")</button>
             </header>
             <ul class="search-results">
                 @foreach (var h in searchResults)
@@ -71,8 +71,8 @@
         {
             <div class="empty-state fade-in">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.6 10.6 15.4 7.4M8.6 13.4l6.8 3.2" /></svg>
-                <h1 class="h3">Benvenuto</h1>
-                <p>Scegli o crea un canale. Nei canali persone e agenti lavorano insieme: scrivi <code>@@NomeAgente</code> per coinvolgere un agente, o affidagli un task — se serve, si farà aiutare dagli altri.</p>
+                <h1 class="h3">@T("ch.welcome")</h1>
+                <p>@((MarkupString)T("ch.welcomeText"))</p>
             </div>
         }
         else
@@ -81,17 +81,17 @@
                 <div class="channel-title">
                     <h1 class="h3">@(current.IsPrivate ? "🔒" : "#")&nbsp;@current.Name</h1>
                     <p class="channel-meta">
-                        @(current.IsPrivate ? $"Privato · {members.Count} membri" : "Pubblico")
-                        @if (channelAgents.Agents.Count > 0) { <span> · @channelAgents.Agents.Count @(channelAgents.Agents.Count == 1 ? "agente" : "agenti")</span> }
+                        @(current.IsPrivate ? T("ch.privateMembers", members.Count) : T("ch.public"))
+                        @if (channelAgents.Agents.Count > 0) { <span> · @T(channelAgents.Agents.Count == 1 ? "ch.oneAgent" : "ch.agents", channelAgents.Agents.Count)</span> }
                     </p>
                 </div>
                 <NotifySelect ChannelId="current.Id" />
                 <div class="nav-tabs" role="tablist">
-                    <button class="nav-link @(tab == "msg" ? "active" : "")" role="tab" aria-selected="@(tab == "msg")" @onclick='() => tab = "msg"'>Messaggi</button>
+                    <button class="nav-link @(tab == "msg" ? "active" : "")" role="tab" aria-selected="@(tab == "msg")" @onclick='() => tab = "msg"'>@T("nav.messages")</button>
                     <button class="nav-link @(tab == "task" ? "active" : "")" role="tab" aria-selected="@(tab == "task")" @onclick='() => tab = "task"'>
-                        Task @if (OpenTasks > 0) { <span class="count">@OpenTasks</span> }
+                        @T("nav.tasks") @if (OpenTasks > 0) { <span class="count">@OpenTasks</span> }
                     </button>
-                    <button class="nav-link @(tab == "mem" ? "active" : "")" role="tab" aria-selected="@(tab == "mem")" @onclick="OpenMemoryAsync">Memoria</button>
+                    <button class="nav-link @(tab == "mem" ? "active" : "")" role="tab" aria-selected="@(tab == "mem")" @onclick="OpenMemoryAsync">@T("tools.memory")</button>
                 </div>
             </header>
 
@@ -101,20 +101,20 @@
                     <span class="chip chip-agent">@AgentAvatar(a, "1.25rem")@a
                         @if (channelAgents.CanManage)
                         {
-                            <button type="button" class="chip-x" title="Togli @a dal canale" aria-label="Togli @a" @onclick="() => RemoveAgentAsync(a)">✕</button>
+                            <button type="button" class="chip-x" title="@T("ch.removeAgent", a)" aria-label="@T("ch.remove", a)" @onclick="() => RemoveAgentAsync(a)">✕</button>
                         }
                     </span>
                 }
                 @if (channelAgents.CanManage && channelAgents.Available.Count > 0)
                 {
-                    <select class="form-select form-select-sm add-agent" value="" @onchange="AddAgentAsync" aria-label="Aggiungi un agente al canale">
-                        <option value="">+ Aggiungi agente</option>
+                    <select class="form-select form-select-sm add-agent" value="" @onchange="AddAgentAsync" aria-label="@T("ch.addAgentLabel")">
+                        <option value="">+ @T("ch.addAgent")</option>
                         @foreach (var a in channelAgents.Available) { <option value="@a">@a</option> }
                     </select>
                 }
                 else if (channelAgents.Agents.Count == 0)
                 {
-                    <span class="text-muted small">@(channelAgents.CanManage ? "Nessun agente: non ce ne sono di abilitati nelle impostazioni." : "Nessun agente in questo canale: chi l'ha creato può aggiungerne.")</span>
+                    <span class="text-muted small">@T(channelAgents.CanManage ? "ch.noAgentsEnabled" : "ch.noAgents")</span>
                 }
             </div>
 
@@ -122,8 +122,8 @@
             {
                 <form @onsubmit="AddMemberAsync" class="members">
                     @foreach (var m in members) { <span class="chip"><span class="avatar" style="@AvatarColor.Style(m, "1.25rem")">@Initials(m)</span>@m</span> }
-                    <input class="form-control form-control-sm" @bind="newMember" @bind:event="oninput" placeholder="Aggiungi per email" aria-label="Utente da aggiungere" />
-                    <button class="btn btn-outline-secondary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newMember)">Aggiungi</button>
+                    <input class="form-control form-control-sm" @bind="newMember" @bind:event="oninput" placeholder="@T("ch.addByEmail")" aria-label="@T("ch.userToAdd")" />
+                    <button class="btn btn-outline-secondary btn-sm" type="submit" disabled="@string.IsNullOrWhiteSpace(newMember)">@T("ch.add")</button>
                 </form>
             }
 
@@ -151,18 +151,18 @@
                             @Message((m, grouped, false))
                             @if (replies.Contains(m.Id))
                             {
-                                <div class="thread" aria-label="Risposte a @m.Author">
+                                <div class="thread" aria-label="@T("ch.repliesTo", m.Author)">
                                     @foreach (var r in replies[m.Id]) { @Message((r, false, true)) }
                                 </div>
                             }
                         }
                         @foreach (var a in typing)
                         {
-                            <div class="typing fade-in">@AgentAvatar(a, "1.5rem")@a sta lavorando <span class="typing-dots"><i></i><i></i><i></i></span></div>
+                            <div class="typing fade-in">@AgentAvatar(a, "1.5rem")@T("ch.working", a) <span class="typing-dots"><i></i><i></i><i></i></span></div>
                         }
                         @foreach (var p in peopleTyping.Keys)
                         {
-                            <div class="typing fade-in"><span class="avatar" style="@AvatarColor.Style(p, "1.5rem")">@Initials(p)</span>@p sta scrivendo <span class="typing-dots"><i></i><i></i><i></i></span></div>
+                            <div class="typing fade-in"><span class="avatar" style="@AvatarColor.Style(p, "1.5rem")">@Initials(p)</span>@T("ch.typing", p) <span class="typing-dots"><i></i><i></i><i></i></span></div>
                         }
                     </div>
                 </div>
@@ -170,14 +170,14 @@
                 @if (replyTo is { } rt && messages.FirstOrDefault(x => x.Id == rt) is { } root)
                 {
                     <div class="replying">
-                        <span>In risposta a <strong>@root.Author</strong>: @(root.Text.Length > 80 ? root.Text[..80] + "…" : root.Text)</span>
-                        <button type="button" class="chip-x" aria-label="Annulla la risposta" @onclick="() => replyTo = null">✕</button>
+                        <span>@T("ch.replyingTo") <strong>@root.Author</strong>: @(root.Text.Length > 80 ? root.Text[..80] + "…" : root.Text)</span>
+                        <button type="button" class="chip-x" aria-label="@T("ch.cancelReply")" @onclick="() => replyTo = null">✕</button>
                     </div>
                 }
                 @if (MentionOptions is { Count: > 0 } options)
                 {
                     @* Dopo "@": gli agenti del canale che si possono menzionare. Tocco, Invio o Tab sceglie (il primo con la tastiera). *@
-                    <ul class="mention-menu" role="listbox" aria-label="Agenti da menzionare">
+                    <ul class="mention-menu" role="listbox" aria-label="@T("ch.mentionable")">
                         @foreach (var a in options)
                         {
                             <li><button type="button" role="option" @onclick="() => PickMention(a)">@@@a</button></li>
@@ -187,47 +187,47 @@
                 <form @onsubmit="SendAsync" class="composer">
                     @if (replyTo is null)
                     {
-                        <label class="as-task" title="Il messaggio diventa un task: lo prende l'agente menzionato (o l'unico del canale)">
-                            <input type="checkbox" @bind="asTask" /> Come task
+                        <label class="as-task" title="@T("ch.asTask.help")">
+                            <input type="checkbox" @bind="asTask" /> @T("ch.asTask")
                         </label>
                     }
-                    <textarea class="form-control" rows="1" @ref="composer" @bind="draft" @bind:event="oninput" @bind:after="OnDraftChanged" maxlength="4000" aria-label="Messaggio"
-                              placeholder="Scrivi a #@current.Name — @@Agente per coinvolgere un agente"></textarea>
-                    <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="Invia">
+                    <textarea class="form-control" rows="1" @ref="composer" @bind="draft" @bind:event="oninput" @bind:after="OnDraftChanged" maxlength="4000" aria-label="@T("chat.message")"
+                              placeholder="@T("ch.composer", current.Name)"></textarea>
+                    <button class="btn btn-primary btn-icon" type="submit" disabled="@string.IsNullOrWhiteSpace(draft)" aria-label="@T("chat.send")">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                     </button>
                 </form>
                 <p class="composer-hint">
-                    Invio per inviare · Maiusc+Invio per andare a capo
+                    @T("ch.enterHint")
                     @if (channelAgents.Agents.Count > 0) { <span> · @string.Join("  ", channelAgents.Agents.Select(a => "@" + a))</span> }
                 </p>
             }
             else if (tab == "mem")
             {
                 <div class="card memory-intro">
-                    <p class="mb-2">Ciò che gli agenti di questo canale ricordano: fatti salvati con <code>remember</code>, riassunti automatici delle conversazioni lunghe e documenti caricati. Prima di rispondere, ogni agente con la memoria attiva richiama i ricordi pertinenti.</p>
+                    <p class="mb-2">@((MarkupString)T("ch.memoryIntro"))</p>
                     <label class="btn btn-outline-secondary btn-sm upload">
-                        Carica un documento
+                        @T("ch.upload")
                         <InputFile OnChange="UploadAsync" accept=".txt,.md,.markdown,.csv,.json,.xml,.html,.log" />
                     </label>
-                    <span class="text-muted small ms-2">Testo fino a 1 MB (.txt, .md, .csv, .json…)</span>
+                    <span class="text-muted small ms-2">@T("ch.uploadHint")</span>
                     @if (memoryStatus is { } ms) { <div class="small mt-2 @(ms.Ok ? "text-success" : "text-danger")">@ms.Text</div> }
                 </div>
-                @if (memoryItems is null) { <p class="text-muted mt-3">Caricamento…</p> }
-                else if (memoryItems.Count == 0) { <p class="text-muted mt-3">La memoria del canale è vuota.</p> }
+                @if (memoryItems is null) { <p class="text-muted mt-3">@T("common.loading")</p> }
+                else if (memoryItems.Count == 0) { <p class="text-muted mt-3">@T("ch.memoryEmpty")</p> }
                 else
                 {
                     <ul class="memories">
                         @foreach (var m in memoryItems)
                         {
                             <li class="memory fade-in" @key="@(m.SourceId ?? m.Id.ToString())">
-                                <span class="mem-kind mem-@m.Kind">@(m.Kind switch { "document" => "Documento", "summary" => "Riassunto", _ => "Ricordo" })</span>
+                                <span class="mem-kind mem-@m.Kind">@T(m.Kind switch { "document" => "ch.mem.document", "summary" => "ch.mem.summary", _ => "ch.mem.fact" })</span>
                                 <div class="memory-body">
-                                    @if (m.Kind == "document") { <div class="memory-title">@m.Title <span class="text-muted small">· @m.Chunks parti</span></div> }
+                                    @if (m.Kind == "document") { <div class="memory-title">@m.Title <span class="text-muted small">· @T("ch.chunks", m.Chunks)</span></div> }
                                     <div class="memory-text">@m.Content</div>
                                     <div class="memory-meta">@m.CreatedBy · @m.CreatedAt.ToLocalTime().ToString("d MMM, HH:mm")</div>
                                 </div>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteMemoryAsync(m)" aria-label="Cancella">Cancella</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteMemoryAsync(m)" aria-label="@T("ch.delete")">@T("ch.delete")</button>
                             </li>
                         }
                     </ul>
@@ -236,21 +236,21 @@
             else
             {
                 <form @onsubmit="CreateTaskAsync" class="card new-task">
-                    <input class="form-control" @bind="newTitle" @bind:event="oninput" placeholder="Cosa c'è da fare?" aria-label="Titolo del task" maxlength="200" />
-                    <textarea class="form-control" rows="2" @bind="newDescription" placeholder="Dettagli (facoltativi)" aria-label="Descrizione" maxlength="4000"></textarea>
+                    <input class="form-control" @bind="newTitle" @bind:event="oninput" placeholder="@T("tasks.whatToDo")" aria-label="@T("ch.taskTitle")" maxlength="200" />
+                    <textarea class="form-control" rows="2" @bind="newDescription" placeholder="@T("tasks.details")" aria-label="@T("tasks.description")" maxlength="4000"></textarea>
                     <div class="new-task-row">
-                        <select class="form-select" @bind="newAssignee" aria-label="Assegna a">
-                            <option value="">Non assegnato</option>
-                            @foreach (var a in channelAgents.Agents) { <option value="@a">@a · agente</option> }
-                            <option value="@NewTaskRequest.Me">A me</option>
+                        <select class="form-select" @bind="newAssignee" aria-label="@T("tasks.assign")">
+                            <option value="">@T("ch.unassigned")</option>
+                            @foreach (var a in channelAgents.Agents) { <option value="@a">@a · @T("log.agentTag")</option> }
+                            <option value="@NewTaskRequest.Me">@T("tasks.toMe")</option>
                         </select>
-                        <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(newTitle)">Crea task</button>
+                        <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(newTitle)">@T("tasks.create")</button>
                     </div>
                 </form>
 
                 @if (tasks.Count == 0)
                 {
-                    <p class="text-muted mt-3">Nessun task in questo canale.</p>
+                    <p class="text-muted mt-3">@T("ch.noTasks")</p>
                 }
                 <ul class="tasks">
                     @foreach (var t in tasks.OrderBy(t => t.Status == WorkStatus.Done).ThenByDescending(t => t.Id))
@@ -260,22 +260,22 @@
                             <div class="task-body">
                                 <div class="task-title">@t.Title <span class="task-id">#@t.Id</span></div>
                                 <div class="task-meta">
-                                    @(t.Assignee is null ? "Non assegnato" : (t.AssigneeIsAgent ? "✦ " : "") + t.Assignee) · creato da @t.CreatedBy
+                                    @(t.Assignee is null ? T("ch.unassigned") : (t.AssigneeIsAgent ? "✦ " : "") + t.Assignee) · @T("ch.createdBy", t.CreatedBy)
                                 </div>
                                 @if (!string.IsNullOrEmpty(t.Description)) { <div class="task-desc">@t.Description</div> }
                                 @if (!string.IsNullOrEmpty(t.Result))
                                 {
-                                    <details class="task-result"><summary>Risultato</summary><div class="msg-text">@t.Result</div></details>
+                                    <details class="task-result"><summary>@T("tasks.result")</summary><div class="msg-text">@t.Result</div></details>
                                 }
                             </div>
                             <div class="task-actions">
                                 @if (t.Status is WorkStatus.Todo or WorkStatus.InProgress && !t.AssigneeIsAgent)
                                 {
-                                    <button class="btn btn-outline-success btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Done)">Fatto</button>
+                                    <button class="btn btn-outline-success btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Done)">@T("task.status.Done")</button>
                                 }
                                 @if (t.Status is WorkStatus.Done or WorkStatus.Failed or WorkStatus.Closed or WorkStatus.Backlog)
                                 {
-                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Todo)">Riapri</button>
+                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => SetStatusAsync(t, WorkStatus.Todo)">@T("ch.reopen")</button>
                                 }
                             </div>
                         </li>
@@ -351,8 +351,8 @@
                     {
                         <div class="msg-head">
                             <strong>@x.M.Author</strong>
-                            @if (x.M.Kind == AuthorKind.Agent) { <span class="tag">agente</span> }
-                            @if (x.M.ParentId is not null && !x.Reply) { <span class="tag">nel thread</span> }
+                            @if (x.M.Kind == AuthorKind.Agent) { <span class="tag">@T("log.agentTag")</span> }
+                            @if (x.M.ParentId is not null && !x.Reply) { <span class="tag">@T("log.inThread")</span> }
                             <time>@x.M.At.ToLocalTime().ToString("HH:mm")</time>
                         </div>
                     }
@@ -360,7 +360,7 @@
                     @foreach (var t in tasks.Where(t => t.MessageId == x.M.Id))
                     {
                         @* Il task della richiesta: il suo lavoro e il risultato stanno nel thread di questo messaggio. *@
-                        <button type="button" class="msg-task" @onclick="() => StartReply(x.M)" title="Apri il thread del task">
+                        <button type="button" class="msg-task" @onclick="() => StartReply(x.M)" title="@T("ch.openTaskThread")">
                             <span class="sq st-@t.Status" aria-hidden="true"></span>
                             <span>Task #@t.Id · @Label(t.Status)</span>
                             @if (t.Assignee is { } who) { <span class="msg-task-who">· @(t.AssigneeIsAgent ? who : who.Split('@')[0])</span> }
@@ -370,9 +370,9 @@
                 <span class="msg-actions">
                     @if (x.M.ParentId is null && tasks.All(t => t.MessageId != x.M.Id))
                     {
-                        <button type="button" class="msg-reply" @onclick="() => TaskFromMessageAsync(x.M)" aria-label="Crea task dal messaggio">Task</button>
+                        <button type="button" class="msg-reply" @onclick="() => TaskFromMessageAsync(x.M)" aria-label="@T("ch.taskFromMessage")">Task</button>
                     }
-                    <button type="button" class="msg-reply" @onclick="() => StartReply(x.M)" aria-label="Rispondi nel thread">Rispondi</button>
+                    <button type="button" class="msg-reply" @onclick="() => StartReply(x.M)" aria-label="@T("chat.replyThread")">@T("ch.reply")</button>
                 </span>
             </article>
         }
@@ -609,13 +609,13 @@
     async Task UploadAsync(InputFileChangeEventArgs e)
     {
         if (current is null) return;
-        memoryStatus = (true, $"Carico «{e.File.Name}» e calcolo gli embedding…");
+        memoryStatus = (true, T("ch.uploading", e.File.Name));
         try
         {
-            if (e.File.Size > 1_000_000) throw new InvalidOperationException("File troppo grande: massimo 1 MB.");
+            if (e.File.Size > 1_000_000) throw new InvalidOperationException(T("ch.fileTooBig"));
             using var reader = new StreamReader(e.File.OpenReadStream(1_000_000));
             await Ws.UploadDocumentAsync(current.Id, e.File.Name, await reader.ReadToEndAsync());
-            memoryStatus = (true, $"«{e.File.Name}» aggiunto alla memoria del canale.");
+            memoryStatus = (true, T("ch.uploaded", e.File.Name));
             memoryItems = await Ws.GetChannelMemoryAsync(current.Id);
         }
         catch (Exception ex) { memoryStatus = (false, ex.GetBaseException().Message); }
@@ -675,7 +675,7 @@
         return parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}" : name[..Math.Min(2, name.Length)];
     }
 
-    static string Label(WorkStatus s) => s switch { WorkStatus.Todo => "Da fare", WorkStatus.InProgress => "In corso", WorkStatus.Done => "Fatto", WorkStatus.Backlog => "Backlog", WorkStatus.Closed => "Chiuso", _ => "Fallito" };
+    static string Label(WorkStatus s) => s == WorkStatus.Backlog ? "Backlog" : T("task.status." + s);
 
     public async ValueTask DisposeAsync()
     {

@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Traduzioni: un file per lingua, dentro l'assembly (server, browser, app e CLI leggono gli stessi). -->
+    <EmbeddedResource Include="i18n\*.json" LogicalName="i18n.%(Filename).json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <SupportedPlatform Include="browser" />
   </ItemGroup>
 

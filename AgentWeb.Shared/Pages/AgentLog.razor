@@ -3,18 +3,18 @@
 @implements IDisposable
 @inject IWorkspaceClient Ws
 
-<PageTitle>Agenti · Statistiche · AgentWeb</PageTitle>
+<PageTitle>@T("settings.agents") · @T("nav.stats") · AgentWeb</PageTitle>
 
 @* Statistiche → Agenti: a sinistra l'albero degli agenti (sotto quello scelto, i canali dove ha lavorato o parlato),
    a destra cosa sta facendo, lo storico dei suoi lavori e i messaggi con persone e altri agenti, più recenti in alto. *@
 <div class="stats-page">
     <header class="stats-head">
-        <h2>Statistiche</h2>
+        <h2>@T("nav.stats")</h2>
         <StatsTabs />
-        <div class="seg" role="group" aria-label="Periodo">
+        <div class="seg" role="group" aria-label="@T("stats.period")">
             @foreach (var d in Periods)
             {
-                <button class="@(days == d ? "on" : "")" @onclick="() => SetDaysAsync(d)">@(d == 1 ? "24 ore" : $"{d} giorni")</button>
+                <button class="@(days == d ? "on" : "")" @onclick="() => SetDaysAsync(d)">@(d == 1 ? T("log.24h") : T("stats.days", d))</button>
             }
         </div>
     </header>
@@ -22,9 +22,9 @@
     @if (error is not null) { <div class="alert alert-danger py-2" role="alert">@error</div> }
 
     <div class="agent-log">
-        <nav class="agent-tree card-block" aria-label="Agenti">
-            @if (agents is null) { <p class="text-muted m-0">Caricamento…</p> }
-            else if (agents.Count == 0) { <p class="text-muted m-0">Nessun agente configurato.</p> }
+        <nav class="agent-tree card-block" aria-label="@T("settings.agents")">
+            @if (agents is null) { <p class="text-muted m-0">@T("common.loading")</p> }
+            else if (agents.Count == 0) { <p class="text-muted m-0">@T("log.noAgents")</p> }
             else
             {
                 <ul role="tree">
@@ -34,7 +34,7 @@
                         <li role="treeitem" aria-expanded="@(open ? "true" : "false")" aria-selected="@(open && channel is null ? "true" : "false")">
                             <button class="node @(open && channel is null ? "on" : "")" @onclick="() => SelectAsync(a)">
                                 <span class="caret" aria-hidden="true">@(open ? "▾" : "▸")</span>
-                                <span class="dot @(IsRunning(a) ? "live" : "")" title="@(IsRunning(a) ? "Al lavoro" : "Fermo")"></span>
+                                <span class="dot @(IsRunning(a) ? "live" : "")" title="@T(IsRunning(a) ? "log.working" : "log.idle")"></span>
                                 @a
                             </button>
                             @if (open && log is not null)
@@ -48,7 +48,7 @@
                                             </button>
                                         </li>
                                     }
-                                    @if (Channels.Count == 0) { <li class="text-muted small ps-4">nessun canale nel periodo</li> }
+                                    @if (Channels.Count == 0) { <li class="text-muted small ps-4">@T("log.noChannels")</li> }
                                 </ul>
                             }
                         </li>
@@ -58,30 +58,30 @@
         </nav>
 
         <section class="agent-detail" aria-live="polite">
-            @if (agent is null) { <p class="text-muted card-block m-0">Scegli un agente a sinistra.</p> }
-            else if (log is null) { <p class="text-muted card-block m-0">Caricamento…</p> }
+            @if (agent is null) { <p class="text-muted card-block m-0">@T("log.pickAgent")</p> }
+            else if (log is null) { <p class="text-muted card-block m-0">@T("common.loading")</p> }
             else
             {
                 var runs = log.Runs.Where(r => channel is null || r.ChannelId == channel).ToList();
                 var totals = log.Totals.Where(t => channel is null || t.ChannelId == channel).ToList();
                 var running = activity?.Running.Where(r => r.Agent == agent && (channel is null || r.ChannelId == channel)).ToList() ?? [];
                 <section class="tiles">
-                    <div class="tile"><span class="tile-label">Lavori</span><strong>@totals.Sum(t => t.Runs)</strong><span class="tile-sub">@totals.Sum(t => t.Delegations) deleghe ricevute</span></div>
-                    <div class="tile"><span class="tile-label">Errori</span><strong>@totals.Sum(t => t.Errors)</strong><span class="tile-sub">nel periodo</span></div>
+                    <div class="tile"><span class="tile-label">@T("stats.runs")</span><strong>@totals.Sum(t => t.Runs)</strong><span class="tile-sub">@T("log.delegationsReceived", totals.Sum(t => t.Delegations))</span></div>
+                    <div class="tile"><span class="tile-label">@T("stats.errors")</span><strong>@totals.Sum(t => t.Errors)</strong><span class="tile-sub">@T("log.inPeriod")</span></div>
                     <div class="tile"><span class="tile-label">Token</span><strong>@Num(totals.Sum(t => t.InputTokens + t.OutputTokens))</strong><span class="tile-sub">@Num(totals.Sum(t => t.InputTokens)) in · @Num(totals.Sum(t => t.OutputTokens)) out</span></div>
                 </section>
 
                 <div class="card-block now">
-                    @if (running.Count == 0) { <span class="text-muted">@agent non sta lavorando ora.</span> }
+                    @if (running.Count == 0) { <span class="text-muted">@T("log.notWorking", agent)</span> }
                     @foreach (var r in running)
                     {
-                        <div><span class="dot live"></span> <strong>@Kind(r.Kind)</strong> in <a href="channels/@r.ChannelId">#@r.Channel</a> · da @Since(r.StartedAt)</div>
+                        <div><span class="dot live"></span> <strong>@Kind(r.Kind)</strong> @T("log.in") <a href="channels/@r.ChannelId">#@r.Channel</a> · @T("log.for", Since(r.StartedAt))</div>
                     }
                 </div>
 
                 <div class="log-head">
-                    <h3 class="section-label m-0">Registro</h3>
-                    <div class="seg" role="group" aria-label="Mostra">
+                    <h3 class="section-label m-0">@T("log.title")</h3>
+                    <div class="seg" role="group" aria-label="@T("log.show")">
                         @foreach (var (key, label) in Shows)
                         {
                             <button class="@(show == key ? "on" : "")" @onclick="() => show = key">@label</button>
@@ -90,7 +90,7 @@
                 </div>
                 <div class="card-block p-0 timeline">
                     @{ var items = Timeline(runs).ToList(); }
-                    @if (items.Count == 0) { <p class="text-muted m-0 p-3">Niente nel periodo.</p> }
+                    @if (items.Count == 0) { <p class="text-muted m-0 p-3">@T("log.nothing")</p> }
                     @foreach (var (at, run, hit) in items)
                     {
                         if (run is not null)
@@ -109,11 +109,11 @@
                         {
                             var m = hit.Message;
                             var mine = m.Author == agent;
-                            <div class="entry msg @(mine ? "mine" : "") @(m.Text.StartsWith("→ chiedo a ") ? "delegation" : "")">
+                            <div class="entry msg @(mine ? "mine" : "") @(m.Text.StartsWith(Asks) ? "delegation" : "")">
                                 <div class="entry-meta">
                                     <span class="entry-icon" aria-hidden="true">@(m.Kind == AuthorKind.Agent ? "✦" : "●")</span>
-                                    <strong>@m.Author</strong> @if (m.Kind == AuthorKind.Agent && !mine) { <span class="item-tag">agente</span> }
-                                    · <a href="channels/@m.ChannelId">#@hit.ChannelName</a>@(m.ParentId is null ? "" : " · nel thread") · @Time(at)
+                                    <strong>@m.Author</strong> @if (m.Kind == AuthorKind.Agent && !mine) { <span class="item-tag">@T("log.agentTag")</span> }
+                                    · <a href="channels/@m.ChannelId">#@hit.ChannelName</a>@(m.ParentId is null ? "" : " · " + T("log.inThread")) · @Time(at)
                                 </div>
                                 <div class="entry-text">@m.Text</div>
                             </div>
@@ -127,7 +127,9 @@
 
 @code {
     static readonly int[] Periods = [1, 7, 30];
-    static readonly (string Key, string Label)[] Shows = [("all", "Tutto"), ("runs", "Lavori"), ("messages", "Messaggi")];
+    static (string Key, string Label)[] Shows => [("all", T("log.all")), ("runs", T("stats.runs")), ("messages", T("nav.messages"))];
+    // Le deleghe scritte dagli agenti iniziano così (stessa chiave usata dal server in WorkspaceStore).
+    static string Asks => T("agent.asks", "\u0001", "").Split('\u0001')[0]; // "→ chiedo a "
     int days = 7;
     string show = "all";
     List<string>? agents;
@@ -228,7 +230,7 @@
         pendingReload?.Cancel();
     }
 
-    static string Kind(string k) => k switch { "risposta" => "Risposta", "task" => "Task", "delega" => "Delega", _ => k };
+    static string Kind(string k) => k switch { "risposta" => T("log.kind.reply"), "task" => "Task", "delega" => T("log.kind.delegation"), _ => k };
     static string Time(DateTimeOffset at) => at.ToLocalTime().ToString("dd/MM HH:mm:ss");
     static string Since(DateTimeOffset at) => (DateTimeOffset.UtcNow - at) is var d && d.TotalMinutes >= 1 ? $"{(int)d.TotalMinutes} min" : $"{(int)d.TotalSeconds} s";
     static string Num(long n) => n >= 1_000_000 ? $"{n / 1_000_000.0:0.#} M" : n >= 10_000 ? $"{n / 1000.0:0.#} k" : n.ToString("N0");

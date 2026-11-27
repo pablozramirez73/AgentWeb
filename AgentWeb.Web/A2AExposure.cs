@@ -2,6 +2,8 @@ using A2A;
 using A2A.AspNetCore;
 using AgentWeb.Shared.Agents;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Agenti con protocollo "A2A": ognuno è un agente A2A su /a2a/<nome> (JSON-RPC), con la sua Agent Card in
@@ -15,11 +17,11 @@ public sealed class ExposedAgentHandler(AgentRuntime runtime, AgentSettingsStore
         var name = http.HttpContext?.GetRouteValue("agent") as string;
         if (name is null || A2AExposure.Find(store.Get(), name) is not { } agent)
         {
-            await responder.ReplyAsync("Agente inesistente o non esposto via A2A.", cancellationToken: cancellationToken);
+            await responder.ReplyAsync(T("a2a.notExposed"), cancellationToken: cancellationToken);
             return;
         }
         var answer = await runtime.AskAsync(agent.Name, context.UserText ?? "", cancellationToken);
-        await responder.ReplyAsync(answer.Length > 0 ? answer : "(nessuna risposta)", cancellationToken: cancellationToken);
+        await responder.ReplyAsync(answer.Length > 0 ? answer : T("agent.noAnswer"), cancellationToken: cancellationToken);
     }
 }
 

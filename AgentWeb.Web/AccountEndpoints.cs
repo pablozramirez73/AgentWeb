@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using static AgentWeb.Shared.Lang;
 
 namespace AgentWeb.Web;
 
@@ -37,9 +38,9 @@ public static class AccountEndpoints
         {
             var user = await users.FindByNameAsync(email?.Trim() ?? "");
             var r = user is null ? Microsoft.AspNetCore.Identity.SignInResult.Failed : await signIn.CheckPasswordSignInAsync(user, password ?? "", lockoutOnFailure: true);
-            if (!r.Succeeded) return Back(r.IsLockedOut ? "Account bloccato per troppi tentativi: riprova più tardi." : "Email o password errate.");
+            if (!r.Succeeded) return Back(T(r.IsLockedOut ? "auth.lockedOut" : "auth.badCredentials"));
             if (!await TwoFactor.PassesAsync(users, user!, code))
-                return Back(string.IsNullOrWhiteSpace(code) ? "Inserisci il codice dell'app di autenticazione." : "Codice di verifica non valido.");
+                return Back(T(string.IsNullOrWhiteSpace(code) ? "auth.enterCode" : "auth.badCode"));
             await SignInWebAsync(user!, signIn, sessions, http);
             return Results.LocalRedirect("~/");
         });
@@ -81,7 +82,7 @@ public static class AccountEndpoints
         admin.MapPost("/users/{userName}/revoke-sessions", async (string userName, SessionStore sessions) => Results.Ok(await sessions.RevokeAllAsync(userName)));
     }
 
-    const string ClosedMessage = "Registrazione chiusa: chiedi un account a un amministratore.";
+    static string ClosedMessage => T("auth.registrationClosed");
 
     internal static async Task SignInWebAsync(AppUser user, SignInManager<AppUser> signIn, SessionStore sessions, HttpContext http)
     {
@@ -92,9 +93,9 @@ public static class AccountEndpoints
     static async Task<(AppUser? User, string? Error)> CreateUserAsync(UserManager<AppUser> users, RoleManager<IdentityRole> roles, string email, string password, bool admin)
     {
         email = email?.Trim() ?? "";
-        if (!new EmailAddressAttribute().IsValid(email)) return (null, "Email non valida.");
+        if (!new EmailAddressAttribute().IsValid(email)) return (null, T("auth.badEmail"));
         // shortcut: conta e crea non sono atomici, due creazioni nello stesso istante possono arrivare a MaxHumanUsers + 1.
-        if (await users.Users.CountAsync() >= MaxHumanUsers) return (null, $"Limite di {MaxHumanUsers} account raggiunto.");
+        if (await users.Users.CountAsync() >= MaxHumanUsers) return (null, T("auth.userLimit", MaxHumanUsers));
         var user = new AppUser { UserName = email, Email = email };
         var r = await users.CreateAsync(user, password ?? "");
         if (!r.Succeeded) return (null, string.Join(" ", r.Errors.Select(e => e.Description)));
@@ -113,20 +114,20 @@ public static class AccountEndpoints
         var e = HtmlEncoder.Default;
         // Solo per account già collegati (da Impostazioni → Account): i provider esterni non creano account.
         var external = providers.Count == 0 ? "" : $"""
-            <div class="login-or text-muted small">oppure</div>
-            {string.Concat(providers.Select(p => $"<a class=\"btn btn-outline-secondary w-100 mb-2\" href=\"/account/external/{e.Encode(p)}\">Continua con {e.Encode(p)}</a>"))}
+            <div class="login-or text-muted small">{T("login.or")}</div>
+            {string.Concat(providers.Select(p => $"<a class=\"btn btn-outline-secondary w-100 mb-2\" href=\"/account/external/{e.Encode(p)}\">{e.Encode(T("login.continueWith", p))}</a>"))}
             """;
         var register = bootstrap
-            ? """<button class="btn btn-outline-secondary" type="submit" formaction="/account/register-form">Crea il primo account</button>"""
+            ? $"""<button class="btn btn-outline-secondary" type="submit" formaction="/account/register-form">{T("login.createFirst")}</button>"""
             : "";
         var hint = bootstrap
-            ? "Nessun account esiste ancora: il primo che crei è amministratore. Password: almeno 6 caratteri con maiuscola, minuscola, numero e simbolo."
-            : "Non hai un account? Chiedilo a un amministratore.";
+            ? T("login.bootstrapHint")
+            : T("login.askAdmin");
         return $$"""
             <!DOCTYPE html>
-            <html lang="it"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+            <html lang="{{Code}}"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
             <meta name="color-scheme" content="light dark" />
-            <title>Accedi · AgentWeb</title>
+            <title>{{T("login.signIn")}} · AgentWeb</title>
             <link rel="stylesheet" href="/_content/AgentWeb.Shared/lib/bootstrap/dist/css/bootstrap.min.css" />
             <link rel="stylesheet" href="/_content/AgentWeb.Shared/app.css" />
             <link rel="manifest" href="/_content/AgentWeb.Shared/manifest.webmanifest" />
@@ -143,8 +144,8 @@ public static class AccountEndpoints
             </style></head>
             <body><main class="login"><div class="login-card fade-in">
               <svg class="login-mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.6 10.6 15.4 7.4M8.6 13.4l6.8 3.2" /></svg>
-              <h1 class="h4 mb-1">Accedi ad AgentWeb</h1>
-              <p class="text-muted small mb-4">Persone e agenti, nello stesso spazio.</p>
+              <h1 class="h4 mb-1">{{T("login.heading")}}</h1>
+              <p class="text-muted small mb-4">{{T("login.tagline")}}</p>
               {{(error is null ? "" : $"<div class=\"alert alert-danger py-2\" role=\"alert\">{e.Encode(error)}</div>")}}
               <form method="post" action="/account/login" class="d-flex flex-column gap-2">
                 <input type="hidden" name="{{e.Encode(field)}}" value="{{e.Encode(token)}}" />
@@ -152,10 +153,10 @@ public static class AccountEndpoints
                 <input class="form-control" id="email" name="email" type="email" autocomplete="username" required autofocus />
                 <label class="form-label mb-0" for="password">Password</label>
                 <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required />
-                <label class="form-label mb-0" for="code">Codice di verifica <span class="text-muted">(se attivo)</span></label>
+                <label class="form-label mb-0" for="code">{{T("login.code")}} <span class="text-muted">{{T("login.ifEnabled")}}</span></label>
                 <input class="form-control" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" />
                 <div class="d-flex gap-2 mt-3">
-                  <button class="btn btn-primary" type="submit">Accedi</button>
+                  <button class="btn btn-primary" type="submit">{{T("login.signIn")}}</button>
                   {{register}}
                 </div>
                 <p class="text-muted small mt-2 mb-0">{{hint}}</p>

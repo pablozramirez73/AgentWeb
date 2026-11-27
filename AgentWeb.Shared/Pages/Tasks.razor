@@ -3,47 +3,47 @@
 @implements IDisposable
 @inject IWorkspaceClient Ws
 
-<PageTitle>Task · AgentWeb</PageTitle>
+<PageTitle>@T("nav.tasks") · AgentWeb</PageTitle>
 
 @* Tutti i task dei canali che vedi: board per stato (trascinabile) o elenco, con filtri. *@
 <div class="tasks-page">
     <header class="tasks-head">
-        <h2>Task</h2>
+        <h2>@T("nav.tasks")</h2>
         <span class="tasks-count">@Shown.Count / @Scoped.Count()</span>
     </header>
 
     <div class="toolbar">
-        <div class="seg" role="group" aria-label="Quali task">
-            <button class="@(mine ? "on" : "")" @onclick="() => mine = true">Miei <span>@tasks.Count(IsMine)</span></button>
-            <button class="@(!mine ? "on" : "")" @onclick="() => mine = false">Tutti <span>@tasks.Count</span></button>
+        <div class="seg" role="group" aria-label="@T("tasks.which")">
+            <button class="@(mine ? "on" : "")" @onclick="() => mine = true">@T("tasks.mine") <span>@tasks.Count(IsMine)</span></button>
+            <button class="@(!mine ? "on" : "")" @onclick="() => mine = false">@T("tasks.all") <span>@tasks.Count</span></button>
         </div>
         <label class="search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-            <input type="search" placeholder="Cerca nei task" aria-label="Cerca nei task" @bind="query" @bind:event="oninput" />
+            <input type="search" placeholder="@T("tasks.search")" aria-label="@T("tasks.search")" @bind="query" @bind:event="oninput" />
         </label>
-        @Filter("Canale", "#", channelFilter, channels.Where(c => c.With is null).Select(c => (c.Id.ToString(), $"#{c.Name}")))
-        @Filter("Stato", "◷", statusFilter, Columns.Select(c => (c.Status.ToString(), c.Label)).Append((WorkStatus.Failed.ToString(), "Fallito")))
-        @Filter("Creato da", "✎", creatorFilter, tasks.Select(t => t.CreatedBy).Distinct().Order().Select(u => (u, Name(u))))
-        @Filter("Assegnato a", "@", assigneeFilter, tasks.Select(t => t.Assignee ?? "").Distinct().Order().Select(u => (u, u == "" ? "Nessuno" : Name(u))))
+        @Filter(T("tasks.channel"), "#", channelFilter, channels.Where(c => c.With is null).Select(c => (c.Id.ToString(), $"#{c.Name}")))
+        @Filter(T("tasks.status"), "◷", statusFilter, Columns.Select(c => (c.Status.ToString(), c.Label)).Append((WorkStatus.Failed.ToString(), Label(WorkStatus.Failed))))
+        @Filter(T("tasks.createdBy"), "✎", creatorFilter, tasks.Select(t => t.CreatedBy).Distinct().Order().Select(u => (u, Name(u))))
+        @Filter(T("tasks.assignedTo"), "@", assigneeFilter, tasks.Select(t => t.Assignee ?? "").Distinct().Order().Select(u => (u, u == "" ? T("tasks.nobody") : Name(u))))
         @if (Filtering) { <button class="btn btn-link clear" @onclick="ClearFilters">Azzera</button> }
         <span class="spacer"></span>
         <label class="sort">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4" /></svg>
-            <select @bind="sort" aria-label="Ordina">
-                <option value="updated">Aggiornati di recente</option>
-                <option value="created">Creati di recente</option>
-                <option value="title">Titolo</option>
+            <select @bind="sort" aria-label="@T("tasks.sort")">
+                <option value="updated">@T("tasks.sort.updated")</option>
+                <option value="created">@T("tasks.sort.created")</option>
+                <option value="title">@T("tasks.title")</option>
             </select>
         </label>
-        <div class="seg" role="group" aria-label="Vista">
-            <button class="@(board ? "" : "on")" @onclick="() => board = false">☰ Elenco</button>
+        <div class="seg" role="group" aria-label="@T("tasks.view")">
+            <button class="@(board ? "" : "on")" @onclick="() => board = false">☰ @T("tasks.list")</button>
             <button class="@(board ? "on" : "")" @onclick="() => board = true">▥ Board</button>
         </div>
-        <button class="btn btn-primary new" @onclick="OpenNew">+ Nuovo task</button>
+        <button class="btn btn-primary new" @onclick="OpenNew">+ @T("tasks.new")</button>
     </div>
 
     @if (error is not null) { <div class="alert alert-danger py-2" role="alert">@error</div> }
-    @if (loading) { <p class="text-muted">Caricamento…</p> }
+    @if (loading) { <p class="text-muted">@T("common.loading")</p> }
     else if (board)
     {
         <div class="board">
@@ -56,11 +56,11 @@
                     <header class="column-head">
                         <span class="sq st-@col.Status" aria-hidden="true"></span>
                         <strong>@col.Label</strong> <span class="n">@items.Count</span>
-                        <button class="chev" aria-label="@(collapsed ? "Espandi" : "Comprimi") @col.Label" @onclick="() => Toggle(col.Status)">@(collapsed ? "›" : "⌄")</button>
+                        <button class="chev" aria-label="@T(collapsed ? "tasks.expand" : "tasks.collapse", col.Label)" @onclick="() => Toggle(col.Status)">@(collapsed ? "›" : "⌄")</button>
                     </header>
                     @if (!collapsed)
                     {
-                        @if (items.Count == 0) { <div class="empty-col">Nessun task @col.Label.ToLowerInvariant()</div> }
+                        @if (items.Count == 0) { <div class="empty-col">@T("stats.noTasks")</div> }
                         @foreach (var t in items)
                         {
                             <article class="card-task" draggable="@(Allowed(t).Count > 1 ? "true" : "false")" @key="t.Id"
@@ -82,7 +82,7 @@
     else
     {
         <div class="list">
-            @if (Shown.Count == 0) { <p class="text-muted p-3 m-0">Nessun task.</p> }
+            @if (Shown.Count == 0) { <p class="text-muted p-3 m-0">@T("stats.noTasks")</p> }
             @foreach (var t in Shown)
             {
                 <div class="row-task" @key="t.Id" @onclick="() => selected = t">
@@ -102,59 +102,59 @@
 @if (selected is { } s)
 {
     <div class="backdrop" @onclick="() => selected = null"></div>
-    <aside class="drawer" aria-label="Dettaglio del task">
+    <aside class="drawer" aria-label="@T("tasks.detail")">
         <header>
             <span class="card-ref">@ChannelName(s.ChannelId) #@s.Id</span>
-            <button class="btn btn-icon" aria-label="Chiudi" @onclick="() => selected = null">✕</button>
+            <button class="btn btn-icon" aria-label="@T("app.close")" @onclick="() => selected = null">✕</button>
         </header>
         <h3>@s.Title</h3>
         <dl>
-            <dt>Stato</dt><dd>@StatusPicker(s)</dd>
-            <dt>Assegnato a</dt><dd>@Person(s.Assignee, s.AssigneeIsAgent)</dd>
-            <dt>Creato da</dt><dd>@Person(s.CreatedBy, false)</dd>
-            <dt>Aggiornato</dt><dd>@s.UpdatedAt.ToLocalTime().ToString("g")</dd>
+            <dt>@T("tasks.status")</dt><dd>@StatusPicker(s)</dd>
+            <dt>@T("tasks.assignedTo")</dt><dd>@Person(s.Assignee, s.AssigneeIsAgent)</dd>
+            <dt>@T("tasks.createdBy")</dt><dd>@Person(s.CreatedBy, false)</dd>
+            <dt>@T("tasks.updated")</dt><dd>@s.UpdatedAt.ToLocalTime().ToString("g")</dd>
         </dl>
-        @if (!string.IsNullOrWhiteSpace(s.Description)) { <h4>Descrizione</h4><p class="pre">@s.Description</p> }
-        @if (!string.IsNullOrWhiteSpace(s.Result)) { <h4>@(s.Status == WorkStatus.Failed ? "Errore" : "Risultato")</h4><p class="pre">@s.Result</p> }
-        <a class="btn btn-outline-secondary" href="channels/@s.ChannelId">Apri il canale</a>
+        @if (!string.IsNullOrWhiteSpace(s.Description)) { <h4>@T("tasks.description")</h4><p class="pre">@s.Description</p> }
+        @if (!string.IsNullOrWhiteSpace(s.Result)) { <h4>@T(s.Status == WorkStatus.Failed ? "tasks.error" : "tasks.result")</h4><p class="pre">@s.Result</p> }
+        <a class="btn btn-outline-secondary" href="channels/@s.ChannelId">@T("tasks.openChannel")</a>
     </aside>
 }
 
 @if (creating)
 {
     <div class="backdrop" @onclick="() => creating = false"></div>
-    <form class="dialog" @onsubmit="CreateAsync" aria-label="Nuovo task">
-        <h3>Nuovo task</h3>
-        <label class="form-label" for="nt-channel">Canale</label>
+    <form class="dialog" @onsubmit="CreateAsync" aria-label="@T("tasks.new")">
+        <h3>@T("tasks.new")</h3>
+        <label class="form-label" for="nt-channel">@T("tasks.channel")</label>
         <select id="nt-channel" class="form-select" value="@newChannel" @onchange="ChannelChangedAsync">
             @foreach (var c in channels.Where(c => c.With is null)) { <option value="@c.Id">#@c.Name</option> }
         </select>
-        <label class="form-label" for="nt-title">Titolo</label>
-        <input id="nt-title" class="form-control" maxlength="200" @bind="newTitle" @bind:event="oninput" placeholder="Cosa c'è da fare?" />
-        <label class="form-label" for="nt-desc">Descrizione</label>
-        <textarea id="nt-desc" class="form-control" rows="4" maxlength="4000" @bind="newDescription" placeholder="Dettagli (facoltativi)"></textarea>
-        <label class="form-label" for="nt-who">Assegna a</label>
+        <label class="form-label" for="nt-title">@T("tasks.title")</label>
+        <input id="nt-title" class="form-control" maxlength="200" @bind="newTitle" @bind:event="oninput" placeholder="@T("tasks.whatToDo")" />
+        <label class="form-label" for="nt-desc">@T("tasks.description")</label>
+        <textarea id="nt-desc" class="form-control" rows="4" maxlength="4000" @bind="newDescription" placeholder="@T("tasks.details")"></textarea>
+        <label class="form-label" for="nt-who">@T("tasks.assign")</label>
         <select id="nt-who" class="form-select" @bind="newAssignee">
-            <option value="">Nessuno</option>
-            <option value="@NewTaskRequest.Me">A me</option>
-            @foreach (var a in newAgents) { <option value="@a">@a · agente (inizia subito)</option> }
+            <option value="">@T("tasks.nobody")</option>
+            <option value="@NewTaskRequest.Me">@T("tasks.toMe")</option>
+            @foreach (var a in newAgents) { <option value="@a">@a · @T("tasks.agentStarts")</option> }
         </select>
         <div class="dialog-actions">
-            <button type="button" class="btn btn-outline-secondary" @onclick="() => creating = false">Annulla</button>
-            <button class="btn btn-primary" type="submit" disabled="@(string.IsNullOrWhiteSpace(newTitle) || newChannel == 0)">Crea task</button>
+            <button type="button" class="btn btn-outline-secondary" @onclick="() => creating = false">@T("common.cancel")</button>
+            <button class="btn btn-primary" type="submit" disabled="@(string.IsNullOrWhiteSpace(newTitle) || newChannel == 0)">@T("tasks.create")</button>
         </div>
     </form>
 }
 
 @code {
     sealed record Col(WorkStatus Status, string Label);
-    static readonly Col[] Columns =
+    static Col[] Columns =>
     [
-        new(WorkStatus.Backlog, "Backlog"), new(WorkStatus.Todo, "Da fare"), new(WorkStatus.InProgress, "In corso"),
-        new(WorkStatus.Done, "Fatto"), new(WorkStatus.Closed, "Chiuso"),
+        new(WorkStatus.Backlog, "Backlog"), new(WorkStatus.Todo, T("task.status.Todo")), new(WorkStatus.InProgress, T("task.status.InProgress")),
+        new(WorkStatus.Done, T("task.status.Done")), new(WorkStatus.Closed, T("task.status.Closed")),
     ];
     static WorkStatus Column(WorkStatus s) => s == WorkStatus.Failed ? WorkStatus.Closed : s; // i falliti stanno tra i chiusi, in rosso
-    static string Label(WorkStatus s) => s == WorkStatus.Failed ? "Fallito" : Columns.First(c => c.Status == s).Label;
+    static string Label(WorkStatus s) => s == WorkStatus.Failed ? T("task.status.Failed") : Columns.First(c => c.Status == s).Label;
 
     List<TaskDto> tasks = [];
     List<ChannelDto> channels = [];
@@ -261,7 +261,7 @@
         if (dragged is not { } t) return;
         dragged = null;
         if (Column(t.Status) == column) return;
-        if (!Allowed(t).Contains(column)) { error = t.AssigneeIsAgent ? "I task degli agenti si spostano solo in Backlog, Da fare o Chiuso, e non mentre ci lavorano." : "Spostamento non consentito."; return; }
+        if (!Allowed(t).Contains(column)) { error = T(t.AssigneeIsAgent ? "tasks.agentMove" : "tasks.moveDenied"); return; }
         await SetStatusAsync(t, column);
     }
 
@@ -307,7 +307,7 @@
     static string Ago(DateTimeOffset t)
     {
         var d = DateTimeOffset.UtcNow - t;
-        return d.TotalMinutes < 1 ? "ora" : d.TotalHours < 1 ? $"{d.TotalMinutes:0} min fa" : d.TotalDays < 1 ? $"{d.TotalHours:0} h fa" : $"{d.TotalDays:0} g fa";
+        return d.TotalMinutes < 1 ? T("ago.now") : d.TotalHours < 1 ? T("ago.min", d.TotalMinutes.ToString("0")) : d.TotalDays < 1 ? T("ago.h", d.TotalHours.ToString("0")) : T("ago.d", d.TotalDays.ToString("0"));
     }
 
     static string Initials(string user)
@@ -319,7 +319,7 @@
     RenderFragment StatusPicker(TaskDto t) =>
         @<label class="status-pick @(t.Status == WorkStatus.Failed ? "failed" : "")">
             <span class="sq st-@t.Status" aria-hidden="true"></span>
-            <select value="@t.Status" disabled="@(Allowed(t).Count < 2)" aria-label="Stato del task #@t.Id"
+            <select value="@t.Status" disabled="@(Allowed(t).Count < 2)" aria-label="@T("tasks.statusOf", t.Id)"
                     @onchange="e => SetStatusAsync(t, Enum.Parse<WorkStatus>((string)e.Value!))">
                 @foreach (var s in Allowed(t)) { <option value="@s">@Label(s)</option> }
             </select>
@@ -328,7 +328,7 @@
     RenderFragment Person(string? user, bool agent) =>
         @<span class="person">@if (user is null)
         {
-            <span class="text-muted">Nessuno</span>
+            <span class="text-muted">@T("tasks.nobody")</span>
         }
         else
         {

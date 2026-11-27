@@ -6,6 +6,8 @@ using Microsoft.Extensions.AI;
 using Npgsql;
 using OllamaSharp;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 public sealed record MemoryHit(long Id, string Scope, string Kind, string? Title, string Content, double Distance);
@@ -34,9 +36,9 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
 
     public async Task<int> AddDocumentAsync(int channelId, string fileName, string text, string user, CancellationToken ct = default)
     {
-        if (text.Length > MaxDocumentChars) throw new ArgumentException("Documento troppo grande: massimo circa 1 MB di testo.");
+        if (text.Length > MaxDocumentChars) throw new ArgumentException(T("memory.tooBig"));
         var chunks = Chunk(text).ToList();
-        if (chunks.Count == 0) throw new ArgumentException("Il documento è vuoto.");
+        if (chunks.Count == 0) throw new ArgumentException(T("memory.empty"));
         // A gruppi: un documento da 1 MB sono ~1.300 pezzi, troppi per una sola chiamata entro il timeout dell'embedding.
         var vectors = new List<float[]>(chunks.Count);
         foreach (var batch in chunks.Chunk(EmbedBatch)) vectors.AddRange(await EmbedAsync(batch, ct));
@@ -167,18 +169,12 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         if (pending.Count <= threshold) return;
         var old = pending.Take(pending.Count - keep).ToList();
         var transcript = string.Join("\n", old.Select(m => $"[{m.Author}]: {m.Text}"));
-        var prompt = $"""
-            Riassumi la conversazione di un canale di lavoro in italiano, in elenco puntato, massimo 250 parole.
-            Conserva decisioni, numeri, nomi, compiti assegnati e questioni aperte. Niente frasi introduttive.
-            {(previous is { } p ? $"Riassunto precedente da integrare:\n{p.Text}\n" : "")}
-            Nuovi messaggi:
-            {transcript}
-            """;
+        var prompt = T("memory.summaryPrompt", previous is { } p ? T("memory.previousSummary", p.Text) : "", transcript);
         var summary = (await llm.GetResponseAsync([new(ChatRole.User, prompt)], cancellationToken: ct)).Text.Trim();
         if (summary.Length == 0) return;
         await AddAsync(new MemoryEntity
         {
-            Scope = "channel", ChannelId = channelId, Kind = "summary", Title = $"Riassunto fino al messaggio {old[^1].Id}",
+            Scope = "channel", ChannelId = channelId, Kind = "summary", Title = T("memory.summaryTitle", old[^1].Id),
             Content = summary, UpToMessageId = old[^1].Id, CreatedBy = "Sistema",
         }, ct);
     }
@@ -190,7 +186,7 @@ public sealed class MemoryStore(IDbContextFactory<AppDb> dbf, IConfiguration con
         var result = await Embedder.GenerateAsync(texts, cancellationToken: ct);
         var vectors = result.Select(e => e.Vector.ToArray()).ToArray();
         if (vectors.Any(v => v.Length != Dimensions))
-            throw new InvalidOperationException($"Il modello di embedding produce vettori da {vectors[0].Length} dimensioni, la memoria ne usa {Dimensions}.");
+            throw new InvalidOperationException(T("memory.dimensions", vectors[0].Length, Dimensions));
         return vectors;
     }
 

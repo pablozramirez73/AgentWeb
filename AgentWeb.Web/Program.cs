@@ -16,6 +16,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
+AgentWeb.Shared.Lang.Use(builder.Configuration["Language"]); // lingua dell'installazione (default italiano)
 
 // OpenTelemetry (tracce → Tempo, metriche → Prometheus, log → Loki, tutto su Grafana) via OTLP verso un collector:
 // attivo solo se è configurato OTEL_EXPORTER_OTLP_ENDPOINT (es. http://localhost:4318 con docker-compose.observability.yml).
@@ -59,7 +60,7 @@ builder.Services.AddDataProtection().SetApplicationName("AgentWeb").PersistKeysT
     "dataprotection-keys")));
 builder.Services.AddIdentityApiEndpoints<AppUser>()
     .AddRoles<IdentityRole>()
-    .AddErrorDescriber<ItalianIdentityErrors>()
+    .AddErrorDescriber<LocalizedIdentityErrors>()
     .AddEntityFrameworkStores<AppDb>();
 builder.Services.ConfigureApplicationCookie(o => o.LoginPath = "/login");
 builder.Services.AddAuthorizationBuilder().AddPolicy(AccountEndpoints.AdminRole, p => p.RequireRole(AccountEndpoints.AdminRole));
@@ -179,6 +180,7 @@ app.MapAgentApi();
 app.MapDaemonEndpoints();
 app.MapOpenApi().RequireAuthorization(); // l'elenco delle rotte non è pubblico
 // Health check per load balancer e container: 200 se il database risponde, 503 altrimenti. Nessun dato.
+app.MapGet("/language", () => AgentWeb.Shared.Lang.Code).AllowAnonymous(); // browser (WASM) e app la chiedono all'avvio
 app.MapGet("/healthz", async (AppDb db, CancellationToken ct) => await db.Database.CanConnectAsync(ct) ? Results.Ok("ok") : Results.StatusCode(503)).AllowAnonymous();
 
 app.MapRazorComponents<App>()

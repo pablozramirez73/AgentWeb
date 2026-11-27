@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Implementazioni "in processo" per le pagine Blazor renderizzate sul server (prerender e InteractiveServer).
@@ -40,7 +42,7 @@ public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus,
         watched = null;
         if (channelId is not { } id) return null;
         var user = await UserAsync();
-        if (!await store.CanAccessAsync(id, user)) throw new KeyNotFoundException($"Canale {id} inesistente.");
+        if (!await store.CanAccessAsync(id, user)) throw new KeyNotFoundException(T("nf.channel", id));
         watched = id;
         return afterId >= 0 ? await store.GetMessagesSinceAsync(id, user, afterId) : null;
     }
@@ -60,7 +62,7 @@ public sealed class LocalWorkspaceClient(WorkspaceStore store, WorkspaceBus bus,
     public async Task DeleteDocumentAsync(int channelId, string sourceId) => await store.DeleteChannelMemoryAsync(channelId, await UserAsync(), 0, sourceId);
 
     async Task<string> UserAsync() =>
-        (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? throw new UnauthorizedAccessException("Non autenticato.");
+        (await auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? throw new UnauthorizedAccessException(T("mcp.err.unauthenticated"));
 
     public async Task<List<ChannelDto>> GetChannelsAsync() => await store.GetChannelsAsync(await UserAsync());
     public async Task<ChannelDto> CreateChannelAsync(string name, bool isPrivate = false) => await store.CreateChannelAsync(name, await UserAsync(), isPrivate);
@@ -101,8 +103,8 @@ public sealed class LocalUserSession(AuthenticationStateProvider auth, Navigatio
     public string? UserName { get; private set; }
 
     public async Task InitializeAsync() => UserName = (await auth.GetAuthenticationStateAsync()).User.Identity?.Name;
-    public Task<string?> LoginAsync(string email, string password, string? code = null) => Task.FromResult<string?>("Usa la pagina /login.");
-    public Task<string?> RegisterAsync(string email, string password) => Task.FromResult<string?>("Usa la pagina /login.");
+    public Task<string?> LoginAsync(string email, string password, string? code = null) => Task.FromResult<string?>(T("auth.useLoginPage"));
+    public Task<string?> RegisterAsync(string email, string password) => Task.FromResult<string?>(T("auth.useLoginPage"));
     public Task<bool> CanRegisterAsync() => Task.FromResult(false); // sul web lo decide la pagina /login
     public Task LogoutAsync() { nav.NavigateTo("logout", forceLoad: true); return Task.CompletedTask; }
 }
@@ -116,7 +118,7 @@ public sealed class LocalAccountClient(SessionStore sessions, AuthenticationStat
     public Task<PushConfigDto> GetPushConfigAsync() => Task.FromResult(new PushConfigDto(push.VapidPublicKey, push.Kinds));
     public async Task RegisterPushDeviceAsync(PushDeviceRequest d) { var (u, sid) = await CurrentAsync(); await using var db = await dbf.CreateDbContextAsync(); await PushEndpoints.RegisterAsync(db, push, u, sid, d); }
     public async Task UnregisterPushDeviceAsync(string token) { await using var db = await dbf.CreateDbContextAsync(); await PushEndpoints.UnregisterAsync(db, (await CurrentAsync()).User, token); }
-    public async Task<int> SendTestPushAsync() => await push.SendAsync((await CurrentAsync()).User, new("AgentWeb", "Le notifiche funzionano su questo dispositivo.", "notifications"));
+    public async Task<int> SendTestPushAsync() => await push.SendAsync((await CurrentAsync()).User, new("AgentWeb", T("push.test"), "notifications"));
 
     async Task<AppUser> UserAsync() => await users.FindByNameAsync((await CurrentAsync()).User) ?? throw new UnauthorizedAccessException();
 
@@ -131,7 +133,7 @@ public sealed class LocalAccountClient(SessionStore sessions, AuthenticationStat
     async Task<(string User, string? Sid)> CurrentAsync()
     {
         var u = (await auth.GetAuthenticationStateAsync()).User;
-        return (u.Identity?.Name ?? throw new UnauthorizedAccessException("Non autenticato."), u.FindFirstValue(SessionStore.Claim));
+        return (u.Identity?.Name ?? throw new UnauthorizedAccessException(T("mcp.err.unauthenticated")), u.FindFirstValue(SessionStore.Claim));
     }
 
     public async Task<List<SessionDto>> GetSessionsAsync() { var (u, sid) = await CurrentAsync(); return await sessions.ListAsync(u, sid); }
@@ -153,8 +155,8 @@ public sealed class LocalAccountClient(SessionStore sessions, AuthenticationStat
         var (u, _) = await CurrentAsync();
         return await TwoFactor.StatusAsync(users, await users.FindByNameAsync(u) ?? throw new UnauthorizedAccessException());
     }
-    public Task EnableTwoFactorAsync(string code) => throw new InvalidOperationException("Disponibile solo dal browser o dall'app.");
-    public Task DisableTwoFactorAsync(string code) => throw new InvalidOperationException("Disponibile solo dal browser o dall'app.");
+    public Task EnableTwoFactorAsync(string code) => throw new InvalidOperationException(T("2fa.browserOnly"));
+    public Task DisableTwoFactorAsync(string code) => throw new InvalidOperationException(T("2fa.browserOnly"));
 }
 
 // Le impostazioni contengono token e possono avviare comandi (stdio): solo amministratori.
@@ -163,7 +165,7 @@ public sealed class LocalAgentSettingsService(AgentSettingsStore store, Authenti
     async Task RequireAdminAsync()
     {
         if (!(await auth.GetAuthenticationStateAsync()).User.IsInRole(AccountEndpoints.AdminRole))
-            throw new UnauthorizedAccessException("Solo gli amministratori possono vedere e modificare gli agenti.");
+            throw new UnauthorizedAccessException(T("settings.adminOnly"));
     }
 
     public async Task<AgentSettingsView> GetAsync(CancellationToken ct = default) { await RequireAdminAsync(); return await store.GetAsync(ct); }

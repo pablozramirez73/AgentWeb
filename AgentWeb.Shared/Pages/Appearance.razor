@@ -2,12 +2,12 @@
 @rendermode InteractiveServer
 @inject IJSRuntime JS
 
-<PageTitle>Aspetto · AgentWeb</PageTitle>
+<PageTitle>@T("settings.appearance") · AgentWeb</PageTitle>
 
-<SettingsShell Title="Aspetto">
-    <h3 class="section-label">Tema</h3>
-    <p class="text-muted">Vale solo per questo dispositivo.</p>
-    <div class="themes" role="radiogroup" aria-label="Tema">
+<SettingsShell Title="@T("settings.appearance")">
+    <h3 class="section-label">@T("theme.title")</h3>
+    <p class="text-muted">@T("theme.thisDevice")</p>
+    <div class="themes" role="radiogroup" aria-label="@T("theme.title")">
         @foreach (var (value, label, hint) in Options)
         {
             <label class="theme-option @(theme == value ? "selected" : "")">
@@ -21,11 +21,11 @@
 </SettingsShell>
 
 @code {
-    static readonly (string Value, string Label, string Hint)[] Options =
+    static (string Value, string Label, string Hint)[] Options =>
     [
-        ("system", "Sistema", "Segue il dispositivo"),
-        ("light", "Chiaro", "Sempre chiaro"),
-        ("dark", "Scuro", "Sempre scuro"),
+        ("system", T("theme.system"), T("theme.system.hint")),
+        ("light", T("theme.light"), T("theme.light.hint")),
+        ("dark", T("theme.dark"), T("theme.dark.hint")),
     ];
 
     string? theme;

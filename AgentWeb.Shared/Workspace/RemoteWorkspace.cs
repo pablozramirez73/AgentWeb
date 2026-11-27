@@ -30,14 +30,18 @@ public sealed class RemoteUserSession(HttpClient anonymous, ITokenStore store) :
     {
         refresh = await store.GetAsync("refresh");
         UserName = await store.GetAsync("user");
+        // App: la lingua la decide il server; senza rete resta quella dell'ultima volta.
+        try { Lang.Use(await anonymous.GetStringAsync("language")); await store.SetAsync("lang", Lang.Code); }
+        catch (HttpRequestException) { Lang.Use(await store.GetAsync("lang")); }
+        catch (TaskCanceledException) { Lang.Use(await store.GetAsync("lang")); }
     }
 
     public async Task<string?> LoginAsync(string email, string password, string? code = null)
     {
         using var r = await anonymous.PostAsJsonAsync("identity/login", new { email, password, twoFactorCode = code });
         if (r.StatusCode == HttpStatusCode.Unauthorized && (await r.Content.ReadAsStringAsync()).Contains("RequiresTwoFactor"))
-            return string.IsNullOrWhiteSpace(code) ? "Inserisci il codice dell'app di autenticazione." : "Codice di verifica non valido.";
-        if (!r.IsSuccessStatusCode) return r.StatusCode == HttpStatusCode.Unauthorized ? "Email o password errate." : $"Server: HTTP {(int)r.StatusCode}";
+            return Lang.T(string.IsNullOrWhiteSpace(code) ? "auth.enterCode" : "auth.badCode");
+        if (!r.IsSuccessStatusCode) return r.StatusCode == HttpStatusCode.Unauthorized ? Lang.T("auth.badCredentials") : $"Server: HTTP {(int)r.StatusCode}";
         await SaveAsync((await r.Content.ReadFromJsonAsync<TokenResponse>())!, email);
         return null;
     }
@@ -268,7 +272,7 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
         if (Connected)
         {
             var r = await hub!.InvokeAsync<HubWatchReply>("WatchFrom", channelId, afterId);
-            if (r.NotFound) throw new KeyNotFoundException($"Canale {channelId} inesistente.");
+            if (r.NotFound) throw new KeyNotFoundException(Lang.T("nf.channel", channelId));
             return r.Replay;
         }
         return channelId is { } id && afterId >= 0 ? await GetMessagesSinceAsync(id, afterId) : null;
@@ -316,7 +320,7 @@ public sealed class RemoteWorkspaceClient(HttpClient http, Func<Task<string?>>? 
         if (Connected)
         {
             var r = await hub!.InvokeAsync<HubSendReply>("Reply", channelId, parentId, text, clientId);
-            if (r.NotFound) throw new KeyNotFoundException($"Canale {channelId} inesistente.");
+            if (r.NotFound) throw new KeyNotFoundException(Lang.T("nf.channel", channelId));
             if (r.Error is { } e) throw new InvalidOperationException(e);
             return;
         }

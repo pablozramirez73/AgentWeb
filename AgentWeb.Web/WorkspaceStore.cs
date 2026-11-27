@@ -5,6 +5,8 @@ using System.Threading.Channels;
 using AgentWeb.Shared.Workspace;
 using Microsoft.EntityFrameworkCore;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Eventi in tempo reale dentro il processo: li ascoltano le pagine Blazor Server e l'hub SignalR (che li instrada per canale).
@@ -83,7 +85,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
 
     public async Task SetChannelNotifyAsync(int channelId, string user, string level)
     {
-        if (!NotifyLevels.Values.Contains(level)) throw new ArgumentException($"Livello di notifica \"{level}\" non valido.");
+        if (!NotifyLevels.Values.Contains(level)) throw new ArgumentException(T("ws.badNotifyLevel", level));
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         await db.ChannelNotify.Where(n => n.UserName == user && n.ChannelId == channelId).ExecuteDeleteAsync();
@@ -96,7 +98,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     {
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
-        if (!await db.Messages.AnyAsync(m => m.Id == rootId && m.ChannelId == channelId && m.ParentId == null)) throw new KeyNotFoundException($"Thread {rootId} inesistente.");
+        if (!await db.Messages.AnyAsync(m => m.Id == rootId && m.ChannelId == channelId && m.ParentId == null)) throw new KeyNotFoundException(T("nf.thread", rootId));
         await db.Database.ExecuteSqlAsync($"""
             INSERT INTO "ThreadReadCursors" ("UserName", "RootId", "LastReadId") VALUES ({user}, {rootId}, {lastId})
             ON CONFLICT ("UserName", "RootId") DO UPDATE SET "LastReadId" = GREATEST("ThreadReadCursors"."LastReadId", EXCLUDED."LastReadId")
@@ -190,7 +192,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     // (suoi messaggi, @menzioni, deleghe ricevute), solo nei canali visibili (ChannelVisibility).
     public async Task<AgentLogDto> GetAgentLogAsync(string user, string agent, int days)
     {
-        agent = Required(agent, 256, "Agente");
+        agent = Required(agent, 256, "field.agent");
         var since = DateTimeOffset.UtcNow.AddDays(-Math.Clamp(days, 1, 90));
         await using var db = await dbf.CreateDbContextAsync();
         var channels = await ChannelVisibility.Visible(db, user).ToDictionaryAsync(c => c.Id, c => c.Name);
@@ -202,7 +204,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             g.Count(r => r.Kind == "delega"), g.Sum(r => r.InputTokens), g.Sum(r => r.OutputTokens))).ToListAsync();
         // @nome seguito da un carattere che non può stare in un nome (come MentionRegex): @Ricercatore non trova @RicercatoreSenior.
         var name = Regex.Escape(agent);
-        string mention = $"@{name}([^[:alnum:]_-]|$)", asked = $"→ chiedo a {name}:";
+        string mention = $"@{name}([^[:alnum:]_-]|$)", asked = T("agent.asks", name, "").TrimEnd();
         var messages = await db.Messages
             .Where(m => m.At >= since && ids.Contains(m.ChannelId) && m.Kind != AuthorKind.System
                 && (m.Author == agent || Regex.IsMatch(m.Text, mention, RegexOptions.IgnoreCase) || Regex.IsMatch(m.Text, asked, RegexOptions.IgnoreCase)))
@@ -214,7 +216,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
 
     public async Task<List<SearchHitDto>> SearchAsync(string user, string query, int take = 50)
     {
-        query = Required(query, 200, "Ricerca");
+        query = Required(query, 200, "field.search");
         await using var db = await dbf.CreateDbContextAsync();
         var visible = ChannelVisibility.Visible(db, user);
         var hits = await db.Messages
@@ -232,7 +234,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var list = await db.Messages.Where(m => m.ChannelId == channelId && (m.Id == rootId || m.ParentId == rootId)).OrderBy(m => m.Id).ToListAsync();
-        if (list.All(m => m.Id != rootId)) throw new KeyNotFoundException($"Messaggio {rootId} inesistente.");
+        if (list.All(m => m.Id != rootId)) throw new KeyNotFoundException(T("nf.message", rootId));
         return list.Select(ToDto).ToList();
     }
 
@@ -254,7 +256,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     // non letti degli altri canali). Con un agente: l'utente è l'unico membro e l'agente è nel canale e risponde a ogni messaggio.
     public async Task<ChannelDto> OpenDirectAsync(string user, string with)
     {
-        with = Required(with, 256, "Destinatario");
+        with = Required(with, 256, "field.recipient");
         var agent = settings.Get().EnabledAgentNames().FirstOrDefault(a => a.Equals(with.TrimStart('@'), StringComparison.OrdinalIgnoreCase));
         await using var db = await dbf.CreateDbContextAsync();
         string key;
@@ -262,7 +264,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         else
         {
             var person = await db.Users.Where(u => u.UserName == with).Select(u => u.UserName).FirstOrDefaultAsync()
-                ?? throw new ArgumentException($"Utente \"{with}\" inesistente.");
+                ?? throw new ArgumentException(T("nf.user", with));
             key = string.Join('|', new[] { user, person! }.Distinct().Order(StringComparer.Ordinal));
         }
         var existing = await db.Channels.FirstOrDefaultAsync(c => c.DirectKey == key);
@@ -300,12 +302,12 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
 
     public async Task<ChannelDto> CreateChannelAsync(string name, string user, bool isPrivate = false)
     {
-        name = Regex.Replace(Required(name, 50, "Nome canale").ToLowerInvariant(), @"\s+", "-");
+        name = Regex.Replace(Required(name, 50, "field.channelName").ToLowerInvariant(), @"\s+", "-");
         await using var db = await dbf.CreateDbContextAsync();
         if (await db.Channels.FirstOrDefaultAsync(c => c.Name == name) is { } existing)
         {
             if (await ChannelVisibility.CanAccessAsync(db, existing.Id, user)) return new(existing.Id, existing.Name, existing.IsPrivate, existing.CreatedBy);
-            throw new ArgumentException("Nome canale già in uso.");
+            throw new ArgumentException(T("ws.channelNameTaken"));
         }
         var c = new ChannelEntity { Name = name, IsPrivate = isPrivate, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = user };
         await using (var tx = await db.Database.BeginTransactionAsync()) // canale privato e creatore-membro insieme, o niente
@@ -318,7 +320,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         }
         var dto = new ChannelDto(c.Id, c.Name, c.IsPrivate, c.CreatedBy);
         bus.Publish(new("channel", c.Id, Channel: dto));
-        await PostAsync(c.Id, "Sistema", AuthorKind.System, $"{user} ha creato il canale{(isPrivate ? " privato" : "")}.");
+        await PostAsync(c.Id, "Sistema", AuthorKind.System, T(isPrivate ? "sys.createdPrivateChannel" : "sys.createdChannel", user));
         return dto;
     }
 
@@ -332,34 +334,34 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
 
     public async Task AddMemberAsync(int channelId, string user, string newMember)
     {
-        newMember = Required(newMember, 256, "Utente");
+        newMember = Required(newMember, 256, "field.user");
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var channel = await db.Channels.SingleAsync(c => c.Id == channelId);
-        if (!channel.IsPrivate) throw new ArgumentException("Il canale è pubblico: lo vedono già tutti.");
-        if (channel.DirectKey is not null) throw new ArgumentException("Un messaggio diretto resta tra due: crea un canale privato per più persone.");
-        if (!await db.Users.AnyAsync(u => u.UserName == newMember)) throw new ArgumentException($"Utente \"{newMember}\" inesistente.");
+        if (!channel.IsPrivate) throw new ArgumentException(T("ws.channelIsPublic"));
+        if (channel.DirectKey is not null) throw new ArgumentException(T("ws.dmIsForTwo"));
+        if (!await db.Users.AnyAsync(u => u.UserName == newMember)) throw new ArgumentException(T("nf.user", newMember));
         if (await db.ChannelMembers.AnyAsync(m => m.ChannelId == channelId && m.UserName == newMember)) return;
         db.ChannelMembers.Add(new() { ChannelId = channelId, UserName = newMember, AddedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync();
         bus.Publish(new("channel", channelId, Channel: new(channel.Id, channel.Name, true, channel.CreatedBy))); // il nuovo membro lo vede comparire
-        await PostAsync(channelId, "Sistema", AuthorKind.System, $"{user} ha aggiunto {newMember} al canale.");
+        await PostAsync(channelId, "Sistema", AuthorKind.System, T("sys.addedMember", user, newMember));
     }
 
     // Chi ha creato il canale toglie gli altri; ognuno può uscire da solo. Il creatore resta (altrimenti nessuno sceglie più gli agenti).
     public async Task RemoveMemberAsync(int channelId, string user, string member)
     {
-        member = Required(member, 256, "Utente");
+        member = Required(member, 256, "field.user");
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var channel = await db.Channels.SingleAsync(c => c.Id == channelId);
-        if (channel.DirectKey is not null) throw new ArgumentException("Da un messaggio diretto non si esce.");
-        if (member == channel.CreatedBy) throw new ArgumentException("Chi ha creato il canale non può essere tolto.");
-        if (member != user && user != channel.CreatedBy) throw new UnauthorizedAccessException("Solo chi ha creato il canale può togliere gli altri membri.");
+        if (channel.DirectKey is not null) throw new ArgumentException(T("ws.cannotLeaveDm"));
+        if (member == channel.CreatedBy) throw new ArgumentException(T("ws.cannotRemoveCreator"));
+        if (member != user && user != channel.CreatedBy) throw new UnauthorizedAccessException(T("ws.onlyCreatorRemoves"));
         if (await db.ChannelMembers.Where(m => m.ChannelId == channelId && m.UserName == member).ExecuteDeleteAsync() == 0)
-            throw new ArgumentException($"{member} non è membro del canale.");
+            throw new ArgumentException(T("ws.notMember", member));
         bus.Publish(new("members", channelId));
-        await PostAsync(channelId, "Sistema", AuthorKind.System, member == user ? $"{user} è uscito dal canale." : $"{user} ha tolto {member} dal canale.");
+        await PostAsync(channelId, "Sistema", AuthorKind.System, member == user ? T("sys.leftChannel", user) : T("sys.removedMember", user, member));
     }
 
     public async Task<List<MessageDto>> GetMessagesAsync(int channelId, string user, int take = 200)
@@ -380,15 +382,15 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
 
     public async Task<MessageDto> PostUserMessageAsync(int channelId, string user, string text, string? clientId = null, long? parentId = null)
     {
-        text = Required(text, 4000, "Messaggio");
-        if (clientId is { Length: > 64 }) throw new ArgumentException("ClientId: massimo 64 caratteri.");
+        text = Required(text, 4000, "field.message");
+        if (clientId is { Length: > 64 }) throw new ArgumentException(T("field.tooLong", "ClientId", 64));
         await using (var db = await dbf.CreateDbContextAsync())
         {
             await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
             if (parentId is { } p)
                 // Un solo livello: rispondere a una risposta vuol dire rispondere nel suo thread.
                 parentId = await db.Messages.Where(m => m.Id == p && m.ChannelId == channelId).Select(m => (long?)(m.ParentId ?? m.Id)).FirstOrDefaultAsync()
-                    ?? throw new ArgumentException($"Messaggio {p} inesistente in questo canale.");
+                    ?? throw new ArgumentException(T("ws.messageNotInChannel", p));
         }
         return await PostAsync(channelId, user, AuthorKind.User, text, 0, clientId, parentId);
     }
@@ -401,7 +403,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         try
         {
             await using var db = await dbf.CreateDbContextAsync();
-            if (!await db.Channels.AnyAsync(c => c.Id == channelId)) throw new KeyNotFoundException($"Canale {channelId} inesistente.");
+            if (!await db.Channels.AnyAsync(c => c.Id == channelId)) throw new KeyNotFoundException(T("nf.channel", channelId));
             // Idempotenza: stesso (canale, autore, ClientId) -> stesso messaggio, nessun nuovo evento, nessuna nuova menzione.
             if (clientId != null && await db.Messages.FirstOrDefaultAsync(m => m.ChannelId == channelId && m.Author == author && m.ClientId == clientId) is { } dup)
                 return ToDto(dup);
@@ -448,7 +450,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             {
                 if (inChannel.Contains(agent, StringComparer.OrdinalIgnoreCase)) queue.Enqueue(new(channelId, agent, null, depth + 1, parentId, dto.Id));
                 else if (kind == AuthorKind.User)
-                    await PostAsync(channelId, "Sistema", AuthorKind.System, $"@{agent} non è in questo canale: chi l'ha creato può aggiungerlo.", parentId: parentId);
+                    await PostAsync(channelId, "Sistema", AuthorKind.System, T("sys.agentNotInChannel", agent), parentId: parentId);
             }
         }
         return dto;
@@ -476,14 +478,14 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     public async Task<List<MemoryHit>> SearchChannelMemoryAsync(int channelId, string user, string query, int take)
     {
         await using (var db = await dbf.CreateDbContextAsync()) await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
-        return await memory.SearchAsync("", channelId, Required(query, 500, "Ricerca"), take); // agente "": solo la memoria del canale
+        return await memory.SearchAsync("", channelId, Required(query, 500, "field.search"), take); // agente "": solo la memoria del canale
     }
 
     public async Task<int> UploadDocumentAsync(int channelId, string user, string fileName, string text)
     {
         await using (var db = await dbf.CreateDbContextAsync()) await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var chunks = await memory.AddDocumentAsync(channelId, fileName, text, user);
-        await PostAsync(channelId, "Sistema", AuthorKind.System, $"{user} ha caricato il documento «{fileName}» nella memoria del canale.");
+        await PostAsync(channelId, "Sistema", AuthorKind.System, T("sys.uploadedDocument", user, fileName));
         return chunks;
     }
 
@@ -493,8 +495,8 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var owner = await db.Channels.Where(c => c.Id == channelId).Select(c => c.CreatedBy).SingleAsync();
         var author = await db.Memories.Where(m => m.ChannelId == channelId && (sourceId != null ? m.SourceId == sourceId : m.Id == memoryId))
-            .Select(m => m.CreatedBy).FirstOrDefaultAsync() ?? throw new KeyNotFoundException("Elemento della memoria inesistente.");
-        if (author != user && owner != user) throw new UnauthorizedAccessException("Può cancellarlo solo chi l'ha creato o chi ha creato il canale.");
+            .Select(m => m.CreatedBy).FirstOrDefaultAsync() ?? throw new KeyNotFoundException(T("ws.memoryNotFound"));
+        if (author != user && owner != user) throw new UnauthorizedAccessException(T("ws.memoryDeleteDenied"));
         if (sourceId != null) await memory.DeleteDocumentAsync(channelId, sourceId); else await memory.DeleteChannelMemoryAsync(channelId, memoryId);
     }
 
@@ -523,12 +525,12 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await using var db = await dbf.CreateDbContextAsync();
         await EnsureOwnerAsync(db, channelId, user);
         var name = settings.Get().EnabledAgentNames().FirstOrDefault(a => a.Equals(agent?.Trim().TrimStart('@'), StringComparison.OrdinalIgnoreCase))
-            ?? throw new ArgumentException($"Agente \"{agent}\" inesistente o disabilitato.");
+            ?? throw new ArgumentException(T("ws.agentNotFound", agent));
         if (await db.ChannelAgents.AnyAsync(a => a.ChannelId == channelId && a.AgentName == name)) return;
         db.ChannelAgents.Add(new() { ChannelId = channelId, AgentName = name, AddedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync();
         bus.Publish(new("agents", channelId));
-        await PostAsync(channelId, "Sistema", AuthorKind.System, $"{user} ha aggiunto l'agente {name} al canale.");
+        await PostAsync(channelId, "Sistema", AuthorKind.System, T("sys.addedAgent", user, name));
     }
 
     public async Task RemoveChannelAgentAsync(int channelId, string user, string agent)
@@ -538,14 +540,14 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         var removed = await db.ChannelAgents.Where(a => a.ChannelId == channelId && a.AgentName.ToLower() == agent.Trim().ToLower()).ExecuteDeleteAsync();
         if (removed == 0) return;
         bus.Publish(new("agents", channelId));
-        await PostAsync(channelId, "Sistema", AuthorKind.System, $"{user} ha tolto l'agente {agent.Trim()} dal canale.");
+        await PostAsync(channelId, "Sistema", AuthorKind.System, T("sys.removedAgent", user, agent.Trim()));
     }
 
     static async Task EnsureOwnerAsync(AppDb db, int channelId, string user)
     {
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         if (await db.Channels.Where(c => c.Id == channelId).Select(c => c.CreatedBy).SingleAsync() != user)
-            throw new UnauthorizedAccessException("Solo chi ha creato il canale può sceglierne gli agenti.");
+            throw new UnauthorizedAccessException(T("ws.onlyCreatorAgents"));
     }
 
     // Contesto che ricevono gli agenti (autorità interna): l'eventuale riassunto della parte vecchia + gli ultimi 30 messaggi.
@@ -554,7 +556,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await using var db = await dbf.CreateDbContextAsync();
         var sb = new StringBuilder();
         if (await memory.LatestSummaryAsync(channelId) is { } summary)
-            sb.AppendLine("Riassunto della conversazione precedente:").AppendLine(summary.Text).AppendLine().AppendLine("Messaggi recenti:");
+            sb.AppendLine(T("ctx.summary")).AppendLine(summary.Text).AppendLine().AppendLine(T("ctx.recent"));
         foreach (var m in await LatestAsync(db, channelId, 30)) sb.AppendLine($"[{m.Author}]: {m.Text}");
         return sb.ToString();
     }
@@ -591,7 +593,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     // Un agente affida lavoro a un altro agente del canale. Limite ai task aperti creati da agenti: niente catene infinite.
     public async Task<TaskDto?> CreateTaskByAgentAsync(int channelId, string agent, string title, string description, string assignee, int maxOpen)
     {
-        title = Required(title, 200, "Titolo");
+        title = Required(title, 200, "field.title");
         description = (description ?? "").Trim();
         if (description.Length > 4000) description = description[..4000];
         var agents = settings.Get().EnabledAgentNames().ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -609,7 +611,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await db.SaveChangesAsync();
         var dto = ToDto(t);
         bus.Publish(new("task", channelId, Task: dto));
-        await PostAsync(channelId, "Sistema", AuthorKind.System, $"{agent} ha creato il task #{t.Id} «{title}» per {assignee}.");
+        await PostAsync(channelId, "Sistema", AuthorKind.System, T("sys.agentCreatedTask", agent, t.Id, title, assignee));
         queue.Enqueue(new(channelId, assignee, t.Id, 0));
         return dto;
     }
@@ -621,7 +623,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await using var db = await dbf.CreateDbContextAsync();
         await ChannelVisibility.EnsureAccessAsync(db, channelId, user);
         var m = await db.Messages.FirstOrDefaultAsync(x => x.Id == messageId && x.ChannelId == channelId && x.Kind != AuthorKind.System)
-            ?? throw new KeyNotFoundException($"Messaggio {messageId} inesistente.");
+            ?? throw new KeyNotFoundException(T("nf.message", messageId));
         if (m.ParentId is { } root) m = await db.Messages.SingleAsync(x => x.Id == root); // il task è della richiesta, non di una risposta
         if (await db.Tasks.FirstOrDefaultAsync(t => t.MessageId == m.Id) is { } existing) return ToDto(existing);
         var inChannel = await ChannelAgentNamesAsync(channelId);
@@ -634,7 +636,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     // "Come task": il messaggio non attiva le @menzioni (risponderebbe due volte), il task lo fa partire.
     public async Task<TaskDto> SendAsTaskAsync(int channelId, string user, string text)
     {
-        text = Required(text, 4000, "Messaggio");
+        text = Required(text, 4000, "field.message");
         await using (var check = await dbf.CreateDbContextAsync()) await ChannelVisibility.EnsureAccessAsync(check, channelId, user);
         var posted = await PostAsync(channelId, user, AuthorKind.User, text, NoMentions);
         return await CreateTaskFromMessageAsync(channelId, posted.Id, user);
@@ -669,7 +671,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         {
             // Prima in coda: se la conferma non si pubblica il task parte lo stesso. La conferma va nel thread della richiesta.
             queue.Enqueue(new(m.ChannelId, agent, t.Id, 0, m.Id));
-            await PostAsync(m.ChannelId, agent, AuthorKind.Agent, $"Lo prendo io come task #{t.Id}." + (string.IsNullOrWhiteSpace(plan) ? "" : $"\n{plan.Trim()}"), NoMentions, parentId: m.Id);
+            await PostAsync(m.ChannelId, agent, AuthorKind.Agent, T("agent.takesTask", t.Id) + (string.IsNullOrWhiteSpace(plan) ? "" : $"\n{plan.Trim()}"), NoMentions, parentId: m.Id);
         }
         return dto;
     }
@@ -710,16 +712,16 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
 
     public async Task<TaskDto> CreateTaskAsync(int channelId, NewTaskRequest req, string user)
     {
-        var title = Required(req.Title, 200, "Titolo");
+        var title = Required(req.Title, 200, "field.title");
         var description = (req.Description ?? "").Trim();
-        if (description.Length > 4000) throw new ArgumentException("Descrizione: massimo 4000 caratteri.");
+        if (description.Length > 4000) throw new ArgumentException(T("field.tooLong", T("field.description"), 4000));
         string? assignee = null;
         var isAgent = false;
         if (req.Assignee == NewTaskRequest.Me) assignee = user;
         else if (!string.IsNullOrWhiteSpace(req.Assignee))
         {
             assignee = (await ChannelAgentNamesAsync(channelId)).FirstOrDefault(a => a.Equals(req.Assignee, StringComparison.OrdinalIgnoreCase))
-                ?? throw new ArgumentException($"L'agente \"{req.Assignee}\" non è in questo canale (o è disabilitato).");
+                ?? throw new ArgumentException(T("ws.assigneeNotInChannel", req.Assignee));
             isAgent = true;
         }
 
@@ -734,7 +736,7 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         await db.SaveChangesAsync();
         var dto = ToDto(t);
         bus.Publish(new("task", channelId, Task: dto));
-        await PostAsync(channelId, "Sistema", AuthorKind.System, $"{user} ha creato il task #{t.Id} «{title}»" + (assignee is null ? "." : $" per {assignee}."));
+        await PostAsync(channelId, "Sistema", AuthorKind.System, assignee is null ? T("sys.createdTask", user, t.Id, title) : T("sys.createdTaskFor", user, t.Id, title, assignee));
         if (isAgent) queue.Enqueue(new(channelId, assignee!, t.Id, 0));
         return dto;
     }
@@ -753,12 +755,12 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
     {
         await using var db = await dbf.CreateDbContextAsync();
         var t = await db.Tasks.FindAsync(taskId);
-        if (t is null || !await ChannelVisibility.CanAccessAsync(db, t.ChannelId, user)) throw new KeyNotFoundException($"Task #{taskId} inesistente.");
+        if (t is null || !await ChannelVisibility.CanAccessAsync(db, t.ChannelId, user)) throw new KeyNotFoundException(T("nf.task", taskId));
         if (status == t.Status) return;
-        if (status == WorkStatus.Failed) throw new ArgumentException("Stato non consentito.");
+        if (status == WorkStatus.Failed) throw new ArgumentException(T("ws.statusNotAllowed"));
         // Gli agenti gestiscono da soli "In corso" e "Fatto"; mentre ci lavorano il task non si sposta.
-        if (t.AssigneeIsAgent && status is WorkStatus.InProgress or WorkStatus.Done) throw new ArgumentException("I task degli agenti si chiudono da soli.");
-        if (t.AssigneeIsAgent && t.Status == WorkStatus.InProgress) throw new ArgumentException($"{t.Assignee} ci sta lavorando: aspetta che finisca.");
+        if (t.AssigneeIsAgent && status is WorkStatus.InProgress or WorkStatus.Done) throw new ArgumentException(T("ws.agentTasksCloseThemselves"));
+        if (t.AssigneeIsAgent && t.Status == WorkStatus.InProgress) throw new ArgumentException(T("ws.agentWorking", t.Assignee));
         // Scrittura condizionata allo stato letto: se nel frattempo il worker l'ha preso (StartTaskAsync), non lo sovrascriviamo.
         var observed = t.Status;
         var result = status == WorkStatus.Todo ? null : t.Result;
@@ -766,15 +768,15 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
         var changed = await db.Tasks.Where(x => x.Id == taskId && x.Status == observed)
             .ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, status).SetProperty(x => x.Result, result).SetProperty(x => x.UpdatedAt, now));
         if (changed == 0)
-            throw new ArgumentException(t.AssigneeIsAgent ? $"{t.Assignee} ci sta lavorando: aspetta che finisca." : "Il task è cambiato nel frattempo: ricarica.");
+            throw new ArgumentException(t.AssigneeIsAgent ? T("ws.agentWorking", t.Assignee) : T("ws.taskChanged"));
         t.Status = status; t.Result = result; t.UpdatedAt = now;
         bus.Publish(new("task", t.ChannelId, Task: ToDto(t)));
-        var verb = status switch
+        var key = status switch
         {
-            WorkStatus.Done => "completato", WorkStatus.Todo => "riaperto", WorkStatus.InProgress => "iniziato",
-            WorkStatus.Backlog => "spostato nel backlog", _ => "chiuso",
+            WorkStatus.Done => "sys.taskDone", WorkStatus.Todo => "sys.taskReopened", WorkStatus.InProgress => "sys.taskStarted",
+            WorkStatus.Backlog => "sys.taskBacklog", _ => "sys.taskClosed",
         };
-        await PostAsync(t.ChannelId, "Sistema", AuthorKind.System, $"{user} ha {verb} il task #{t.Id}.");
+        await PostAsync(t.ChannelId, "Sistema", AuthorKind.System, T(key, user, t.Id));
         if (status == WorkStatus.Todo && t.AssigneeIsAgent) queue.Enqueue(new(t.ChannelId, t.Assignee!, t.Id, 0));
     }
 
@@ -839,11 +841,12 @@ public sealed partial class WorkspaceStore(IDbContextFactory<AppDb> dbf, Workspa
             .OfType<string>().Distinct().ToList();
     }
 
+    // field: chiave i18n del nome del campo.
     static string Required(string? value, int max, string field)
     {
         value = value?.Trim() ?? "";
-        if (value.Length == 0) throw new ArgumentException($"{field}: obbligatorio.");
-        if (value.Length > max) throw new ArgumentException($"{field}: massimo {max} caratteri.");
+        if (value.Length == 0) throw new ArgumentException(T("field.required", T(field)));
+        if (value.Length > max) throw new ArgumentException(T("field.tooLong", T(field), max));
         return value;
     }
 

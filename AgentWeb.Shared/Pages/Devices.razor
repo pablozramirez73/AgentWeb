@@ -2,11 +2,11 @@
 @rendermode InteractiveWebAssembly
 @inject IAccountClient Account
 
-<PageTitle>Sicurezza e dispositivi · AgentWeb</PageTitle>
+<PageTitle>@T("settings.devices") · AgentWeb</PageTitle>
 
-<SettingsShell Title="Sicurezza e dispositivi">
+<SettingsShell Title="@T("settings.devices")">
 <div class="page-header">
-    <p>Ogni accesso — browser, app, terminale, agente esterno — è una sessione. Revocarla la chiude subito, anche le connessioni aperte.</p>
+    <p>@T("devices.intro")</p>
 </div>
 
 @if (error is not null)
@@ -15,7 +15,7 @@
 }
 @if (Sessions is null)
 {
-    <p class="text-muted">Caricamento…</p>
+    <p class="text-muted">@T("common.loading")</p>
 }
 else
 {
@@ -29,58 +29,58 @@ else
                     else { <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></svg> }
                 </span>
                 <div class="session-body">
-                    <div class="session-title">@Title(s) @if (s.Current) { <span class="badge bg-success ms-1">questo dispositivo</span> }</div>
-                    <div class="session-meta">@Kind(s.Kind) · dal @s.CreatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm")</div>
+                    <div class="session-title">@Title(s) @if (s.Current) { <span class="badge bg-success ms-1">@T("devices.thisOne")</span> }</div>
+                    <div class="session-meta">@Kind(s.Kind) · @T("devices.since", s.CreatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm"))</div>
                 </div>
-                <button class="btn btn-sm btn-outline-danger" @onclick="() => RevokeAsync(s)">@(s.Current ? "Esci" : "Revoca")</button>
+                <button class="btn btn-sm btn-outline-danger" @onclick="() => RevokeAsync(s)">@T(s.Current ? "nav.signOut" : "devices.revoke")</button>
             </li>
         }
     </ul>
-    <button class="btn btn-outline-danger btn-sm mt-2" @onclick="RevokeAllAsync">Esci da tutti i dispositivi</button>
+    <button class="btn btn-outline-danger btn-sm mt-2" @onclick="RevokeAllAsync">@T("devices.signOutAll")</button>
 }
 
-<h4 class="mt-4">Verifica in due passaggi</h4>
-@if (twoFactor is null) { <p class="text-muted">Caricamento…</p> }
+<h4 class="mt-4">@T("2fa.title")</h4>
+@if (twoFactor is null) { <p class="text-muted">@T("common.loading")</p> }
 else if (twoFactor.Enabled)
 {
-    <p>Attiva: all'accesso serve anche il codice dell'app di autenticazione.</p>
+    <p>@T("2fa.onText")</p>
     <form @onsubmit="DisableTwoFactorAsync" class="d-flex gap-2 mb-2" style="max-width: 360px">
-        <input class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="twoFactorCode" @bind:event="oninput" placeholder="Codice attuale" aria-label="Codice per disattivare" />
-        <button class="btn btn-outline-danger" type="submit" disabled="@(twoFactorCode.Length == 0)">Disattiva</button>
+        <input class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="twoFactorCode" @bind:event="oninput" placeholder="@T("2fa.currentCode")" aria-label="@T("2fa.codeToDisable")" />
+        <button class="btn btn-outline-danger" type="submit" disabled="@(twoFactorCode.Length == 0)">@T("common.disable")</button>
     </form>
 }
 else
 {
-    <p class="text-muted">Aggiungi AgentWeb a un'app di autenticazione (Google Authenticator, 1Password, Authy…) con questa chiave, poi conferma con il codice che mostra.</p>
+    <p class="text-muted">@T("2fa.setupText")</p>
     <p><code class="user-select-all">@twoFactor.SharedKey</code></p>
-    <details class="mb-2"><summary class="small">Link otpauth:// (per le app che lo accettano)</summary><code class="user-select-all small">@twoFactor.AuthenticatorUri</code></details>
+    <details class="mb-2"><summary class="small">@T("2fa.otpLink")</summary><code class="user-select-all small">@twoFactor.AuthenticatorUri</code></details>
     <form @onsubmit="EnableTwoFactorAsync" class="d-flex gap-2 mb-2" style="max-width: 360px">
-        <input class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="twoFactorCode" @bind:event="oninput" placeholder="Codice a 6 cifre" aria-label="Codice di verifica" />
-        <button class="btn btn-primary" type="submit" disabled="@(twoFactorCode.Length == 0)">Attiva</button>
+        <input class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="twoFactorCode" @bind:event="oninput" placeholder="@T("2fa.sixDigits")" aria-label="@T("login.code")" />
+        <button class="btn btn-primary" type="submit" disabled="@(twoFactorCode.Length == 0)">@T("common.enable")</button>
     </form>
 }
 @if (twoFactorMessage is { } tm) { <div class="@(tm.Ok ? "text-success" : "text-danger") mb-2" role="status">@tm.Text</div> }
 
-<h4 class="mt-4">Token per agenti esterni (MCP)</h4>
-<p class="text-muted">Claude, Hermes e altri client MCP possono lavorare nel workspace come te tramite <code>@Mcp</code>: canali, messaggi, task e domande agli agenti, con i tuoi stessi permessi. Ogni token compare qui sopra come sessione "Token" e si revoca allo stesso modo.</p>
+<h4 class="mt-4">@T("tokens.title")</h4>
+<p class="text-muted">@((MarkupString)T("tokens.intro", $"<code>{System.Net.WebUtility.HtmlEncode(Mcp)}</code>"))</p>
 <form @onsubmit="CreateTokenAsync" class="d-flex gap-2 mb-3">
-    <input class="form-control" style="max-width: 320px" @bind="tokenName" @bind:event="oninput" placeholder="es. claude-code, hermes" aria-label="Nome del token" maxlength="100" />
-    <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(tokenName)">Crea token</button>
+    <input class="form-control" style="max-width: 320px" @bind="tokenName" @bind:event="oninput" placeholder="@T("tokens.placeholder")" aria-label="@T("tokens.name")" maxlength="100" />
+    <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(tokenName)">@T("tokens.create")</button>
 </form>
 @if (created is { } t)
 {
     <div class="alert alert-warning">
-        <strong>Copia ora il token «@t.Name»: non verrà più mostrato.</strong>
+        <strong>@T("tokens.copyNow", t.Name)</strong>
         <pre class="mt-2 mb-3 user-select-all" style="white-space: pre-wrap; word-break: break-all">@t.Token</pre>
         <div class="small">
-            <strong>Claude Code</strong> (terminale):
+            <strong>Claude Code</strong> (@T("tokens.terminal")):
             <pre class="user-select-all" style="white-space: pre-wrap; word-break: break-all">claude mcp add --transport http agentweb @Mcp --header "Authorization: Bearer @t.Token"</pre>
-            <strong>Hermes</strong> (<code>~/.hermes/config.yaml</code>, sotto <code>mcp_servers:</code>), poi <code>hermes mcp test agentweb</code>:
+            <strong>Hermes</strong> (<code>~/.hermes/config.yaml</code>, @T("tokens.under") <code>mcp_servers:</code>), @T("tokens.then") <code>hermes mcp test agentweb</code>:
             <pre class="user-select-all">  agentweb:
     url: @Mcp
     headers:
       Authorization: Bearer @t.Token</pre>
-            <strong>Altri client MCP</strong>: trasporto HTTP (Streamable) su <code>@Mcp</code> con l'header <code>Authorization: Bearer &lt;token&gt;</code>.
+            <strong>@T("tokens.otherClients")</strong>: @T("tokens.transport") <code>@Mcp</code> @T("tokens.withHeader") <code>Authorization: Bearer &lt;token&gt;</code>.
         </div>
     </div>
 }
@@ -100,8 +100,8 @@ else
     string twoFactorCode = "";
     (bool Ok, string Text)? twoFactorMessage;
 
-    Task EnableTwoFactorAsync() => ChangeTwoFactorAsync(() => Account.EnableTwoFactorAsync(twoFactorCode.Trim()), "Verifica in due passaggi attivata.");
-    Task DisableTwoFactorAsync() => ChangeTwoFactorAsync(() => Account.DisableTwoFactorAsync(twoFactorCode.Trim()), "Verifica in due passaggi disattivata.");
+    Task EnableTwoFactorAsync() => ChangeTwoFactorAsync(() => Account.EnableTwoFactorAsync(twoFactorCode.Trim()), T("2fa.enabled"));
+    Task DisableTwoFactorAsync() => ChangeTwoFactorAsync(() => Account.DisableTwoFactorAsync(twoFactorCode.Trim()), T("2fa.disabled"));
 
     async Task ChangeTwoFactorAsync(Func<Task> change, string done)
     {
@@ -143,7 +143,7 @@ else
         await LoadAsync();
     }
 
-    static string Kind(string k) => k switch { "web" => "Browser", "app" => "App / terminale", "token" => "Token per agenti (MCP)", _ => k };
+    static string Kind(string k) => k switch { "web" => "Browser", "app" => T("devices.kind.app"), "token" => T("devices.kind.token"), _ => k };
 
     // Nome leggibile dallo User-Agent salvato con la sessione (o il nome dato al token).
     static string Title(SessionDto s)
@@ -151,9 +151,9 @@ else
         var d = s.Device ?? "";
         if (s.Kind == "token") return d.Length > 0 ? d : "Token";
         if (d.StartsWith("AgentWeb-App/")) return "App AgentWeb " + (d.Contains("iOS") ? "· iPhone" : d.Contains("Android") ? "· Android" : "");
-        if (d.StartsWith("agentweb-cli/")) return "Terminale (agentweb)";
+        if (d.StartsWith("agentweb-cli/")) return T("devices.cli");
         var browser = d.Contains("Edg/") ? "Edge" : d.Contains("Chrome/") ? "Chrome" : d.Contains("Firefox/") ? "Firefox" : d.Contains("Safari/") ? "Safari" : "Browser";
         var os = d.Contains("Mac OS X") ? "macOS" : d.Contains("Windows") ? "Windows" : d.Contains("iPhone") ? "iPhone" : d.Contains("Android") ? "Android" : d.Contains("Linux") ? "Linux" : "";
-        return os.Length > 0 ? $"{browser} su {os}" : browser;
+        return os.Length > 0 ? T("devices.browserOn", browser, os) : browser;
     }
 }

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using AgentWeb.Shared.Agents;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // shortcut: file JSON in chiaro (token inclusi) nella content root; per produzione passare a user-secrets/Key Vault.
@@ -60,8 +62,8 @@ public sealed class AgentSettingsStore(IWebHostEnvironment env, IConfiguration c
     public async Task<string> TestLlmAsync(LlmProviderConfig provider, CancellationToken ct = default) => provider.Kind != LlmKinds.Daemon
         ? await Explained(() => LlmClients.TestAsync(provider, ct), provider, ct)
         : await daemons.OffersAsync(provider.Url.Trim(), provider.DefaultModel)
-            ? $"Il daemon di {provider.Url.Trim()} è collegato e offre «{provider.DefaultModel}»."
-            : throw new InvalidOperationException($"Nessun daemon di {provider.Url.Trim()} collegato con il runtime «{provider.DefaultModel}».");
+            ? T("settings.daemonOk", provider.Url.Trim(), provider.DefaultModel)
+            : throw new InvalidOperationException(T("settings.daemonMissing", provider.Url.Trim(), provider.DefaultModel));
 
     // Per un daemon i "modelli" sono i runtime che i suoi computer collegati offrono.
     public Task<List<string>> ListModelsAsync(LlmProviderConfig provider, CancellationToken ct = default) =>

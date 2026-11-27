@@ -1,12 +1,12 @@
 @* Notifiche di una conversazione (canale o messaggio diretto): vince sulle impostazioni dell'account. *@
 @inject IWorkspaceClient Ws
 
-<select class="form-select form-select-sm w-auto" aria-label="Notifiche di questa conversazione" title="@error"
+<select class="form-select form-select-sm w-auto" aria-label="@T("notify.thisConversation")" title="@error"
         value="@level" disabled="@(level is null)" @onchange="ChangeAsync">
-    <option value="@NotifyLevels.Default">🔔 Predefinite</option>
-    <option value="@NotifyLevels.All">🔔 Tutti i messaggi</option>
-    <option value="@NotifyLevels.Mentions">🔔 Solo menzioni</option>
-    <option value="@NotifyLevels.Mute">🔕 Silenziata</option>
+    <option value="@NotifyLevels.Default">🔔 @T("notify.default")</option>
+    <option value="@NotifyLevels.All">🔔 @T("notify.all")</option>
+    <option value="@NotifyLevels.Mentions">🔔 @T("notify.mentions")</option>
+    <option value="@NotifyLevels.Mute">🔕 @T("notify.mute")</option>
 </select>
 
 @code {

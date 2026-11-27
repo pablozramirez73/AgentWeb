@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Il documento OpenAPI dichiara come ci si autentica: bearer (app, CLI, token MCP via /identity/login o /api/account/tokens)
@@ -18,12 +20,12 @@ public static class OpenApiSecurity
             doc.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
             {
                 Type = SecuritySchemeType.Http, Scheme = "bearer",
-                Description = "Access token da POST /identity/login (rinnovo con /identity/refresh) o token MCP.",
+                Description = T("openapi.bearer"),
             };
             doc.Components.SecuritySchemes["Cookie"] = new OpenApiSecurityScheme
             {
                 Type = SecuritySchemeType.ApiKey, In = ParameterLocation.Cookie, Name = ".AspNetCore.Identity.Application",
-                Description = "Cookie di login del browser (POST /account/login).",
+                Description = T("openapi.cookie"),
             };
             return Task.CompletedTask;
         });

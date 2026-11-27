@@ -13,6 +13,8 @@ using Lib.Net.Http.WebPush.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 public sealed record PushNote(string Title, string Body, string Url);
@@ -51,7 +53,7 @@ public sealed partial class PushSender
             ConnectCallback = async (ctx, ct) =>
             {
                 var allowed = (await Dns.GetHostAddressesAsync(ctx.DnsEndPoint.Host, ct)).Where(a => allowPrivate || SafeFetch.IsPublic(a)).ToArray();
-                if (allowed.Length == 0) throw new HttpRequestException($"indirizzo non pubblico: {ctx.DnsEndPoint.Host}");
+                if (allowed.Length == 0) throw new HttpRequestException(T("net.notPublic", ctx.DnsEndPoint.Host));
                 var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
                 try { await socket.ConnectAsync(allowed, ctx.DnsEndPoint.Port, ct); return new NetworkStream(socket, ownsSocket: true); }
                 catch { socket.Dispose(); throw; }
@@ -189,15 +191,15 @@ public sealed partial class PushNotifier(WorkspaceBus bus, IDbContextFactory<App
                 var mention = (u.NotifyMentions || level != NotifyLevels.Default) && mentioned.Contains(Handle(u.Name));
                 if (!mention && !(level == NotifyLevels.All || level == NotifyLevels.Default && u.NotifyPrivate && ch.IsPrivate)) continue;
                 if (!await ChannelVisibility.CanAccessAsync(db, e.ChannelId, u.Name)) continue;
-                var title = ch.DirectKey is not null ? $"{Handle(m.Author)} ti ha scritto"
-                    : mention ? $"{Handle(m.Author)} ti ha menzionato in #{ch.Name}" : $"#{ch.Name} · {Handle(m.Author)}";
+                var title = ch.DirectKey is not null ? T("push.wroteYou", Handle(m.Author))
+                    : mention ? T("push.mentionedYou", Handle(m.Author), ch.Name) : $"#{ch.Name} · {Handle(m.Author)}";
                 result.Add((u.Name, new(title, body, ch.DirectKey is not null ? "messages" : url)));
             }
         }
         else if (e is { Kind: "task", Task: { AssigneeIsAgent: false, Assignee: { } assignee, Status: WorkStatus.Todo } t } && assignee != t.CreatedBy
             && users.FirstOrDefault(u => u.Name == assignee) is { NotifyTasks: true }
             && await ChannelVisibility.CanAccessAsync(db, e.ChannelId, assignee))
-            result.Add((assignee, new($"Nuovo task da {Handle(t.CreatedBy)} in #{ch.Name}", t.Title, url)));
+            result.Add((assignee, new(T("push.newTask", Handle(t.CreatedBy), ch.Name), t.Title, url)));
         return result;
     }
 
@@ -221,16 +223,16 @@ public static class PushEndpoints
     // Stesso token = stesso dispositivo: se ora lo usa un altro account (logout e login di un altro), passa a quello.
     public static async Task RegisterAsync(AppDb db, PushSender sender, string user, string? sid, PushDeviceRequest d)
     {
-        if (!sender.Kinds.Contains(d.Kind)) throw new ArgumentException($"Notifiche \"{d.Kind}\" non attive sul server.");
-        if (string.IsNullOrWhiteSpace(d.Token) || d.Token.Length > 1000) throw new ArgumentException("Token del dispositivo non valido.");
+        if (!sender.Kinds.Contains(d.Kind)) throw new ArgumentException(T("push.kindOff", d.Kind));
+        if (string.IsNullOrWhiteSpace(d.Token) || d.Token.Length > 1000) throw new ArgumentException(T("push.badToken"));
         if (d.Kind == "web" && (!Uri.TryCreate(d.Token, UriKind.Absolute, out var endpoint) || !(endpoint.Scheme == "https" || sender.AllowHttpEndpoints && endpoint.Scheme == "http")
             || string.IsNullOrEmpty(d.P256dh) || string.IsNullOrEmpty(d.Auth) || d.P256dh.Length > 200 || d.Auth.Length > 100))
-            throw new ArgumentException("Iscrizione Web Push non valida.");
+            throw new ArgumentException(T("push.badSubscription"));
         var device = await db.PushDevices.FirstOrDefaultAsync(x => x.Token == d.Token);
         if (device is null)
         {
             if (await db.PushDevices.CountAsync(x => x.UserName == user) >= MaxDevicesPerUser)
-                throw new ArgumentException($"Al massimo {MaxDevicesPerUser} dispositivi: disattiva le notifiche su uno vecchio.");
+                throw new ArgumentException(T("push.tooManyDevices", MaxDevicesPerUser));
             db.PushDevices.Add(device = new() { Token = d.Token, CreatedAt = DateTimeOffset.UtcNow });
         }
         (device.UserName, device.Sid, device.Kind, device.P256dh, device.Auth) = (user, sid, d.Kind, d.P256dh, d.Auth);
@@ -254,7 +256,7 @@ public static class PushEndpoints
         });
         me.MapPost("/push/devices/remove", async (PushTokenRequest r, ClaimsPrincipal u, AppDb db) => { await UnregisterAsync(db, Me(u), r.Token); return Results.NoContent(); });
         me.MapPost("/push/test", async (ClaimsPrincipal u, PushSender s) =>
-            await s.SendAsync(Me(u), new("AgentWeb", "Le notifiche funzionano su questo dispositivo.", "notifications")))
+            await s.SendAsync(Me(u), new("AgentWeb", T("push.test"), "notifications")))
             .RequireRateLimiting(SessionEndpoints.AuthRateLimit);
     }
 }

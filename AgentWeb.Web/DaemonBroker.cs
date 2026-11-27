@@ -4,6 +4,8 @@ using AgentWeb.Shared.Workspace;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Consegna il lavoro degli agenti con LLM "daemon" al computer del loro utente. Il server non esegue nulla:
@@ -63,7 +65,7 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
     public async Task<string> AskAsync(string owner, string runtime, string prompt, CancellationToken ct)
     {
         if (!await OffersAsync(owner, runtime))
-            throw new InvalidOperationException($"nessun daemon di {owner} offre il runtime \"{runtime}\": va avviato `agentweb daemon --runtime {runtime}=<comando>` su quel computer.");
+            throw new InvalidOperationException(T("broker.noDaemon", owner, runtime));
         var id = Guid.NewGuid().ToString("N");
         await using (var db = await dbf.CreateDbContextAsync())
         {
@@ -81,11 +83,11 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
                 var seen = Now;
                 await db.DaemonDeliveries.Where(d => d.Id == id).ExecuteUpdateAsync(s => s.SetProperty(d => d.WaiterSeenAt, seen), ct);
                 var w = await db.DaemonDeliveries.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, ct)
-                    ?? throw new InvalidOperationException("consegna al daemon persa.");
+                    ?? throw new InvalidOperationException(T("broker.lost"));
                 if (w.Done)
-                    return w.Error is { Length: > 0 } e ? throw new InvalidOperationException(w.Attempts > MaxAttempts ? e : $"il runtime {w.Runtime} ha fallito: {e}") : w.Result ?? "";
-                if (Now > deadline) throw new TimeoutException($"il daemon di {owner} non ha risposto entro {timeout.TotalMinutes:0} minuti.");
-                if (w.Sid is null && !await OffersAsync(owner, runtime)) throw new InvalidOperationException($"il daemon di {owner} si è disconnesso.");
+                    return w.Error is { Length: > 0 } e ? throw new InvalidOperationException(w.Attempts > MaxAttempts ? e : T("broker.runtimeFailed", w.Runtime, e)) : w.Result ?? "";
+                if (Now > deadline) throw new TimeoutException(T("broker.timeout", owner, timeout.TotalMinutes.ToString("0")));
+                if (w.Sid is null && !await OffersAsync(owner, runtime)) throw new InvalidOperationException(T("broker.disconnected", owner));
             }
         }
         finally
@@ -166,7 +168,7 @@ public sealed partial class DaemonBroker(IConfiguration config, TimeProvider tim
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Sid, (string?)null), ct);
         await db.DaemonDeliveries.Where(d => d.Sid != null && !d.Done && d.LeaseUntil < now && d.Attempts >= MaxAttempts)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Done, true).SetProperty(d => d.Attempts, MaxAttempts + 1)
-                .SetProperty(d => d.Error, $"consegna abbandonata {MaxAttempts} volte dal daemon."), ct);
+                .SetProperty(d => d.Error, T("broker.abandoned", MaxAttempts)), ct);
         // Senza più chi aspetta (replica caduta): via subito, così nessun daemon la esegue e chi la sta eseguendo si ferma (heartbeat false).
         var (stale, orphan) = (now - timeout - lease, WaiterSince);
         await db.DaemonDeliveries.Where(d => d.CreatedAt < stale || d.WaiterSeenAt < orphan).ExecuteDeleteAsync(ct);
@@ -204,7 +206,7 @@ public static class DaemonEndpoints
         d.MapPost("/poll", async (DaemonPollRequest req, DaemonBroker b, ClaimsPrincipal u, CancellationToken ct) =>
         {
             if (req.Machine is not { Length: > 0 and <= 100 } || req.Runtimes is not { Count: > 0 and <= 20 } || !req.Runtimes.All(DaemonBroker.RuntimeName().IsMatch))
-                return Results.Text("Macchina (max 100 caratteri) e da 1 a 20 runtime (lettere, numeri, _ . -) obbligatori.", statusCode: 400);
+                return Results.Text(T("broker.badPoll"), statusCode: 400);
             if (Sid(u) is not { } sid) return Results.Unauthorized();
             try { return await b.PollAsync(u.Identity!.Name!, sid, req, ct) is { } w ? Results.Ok(w) : Results.NoContent(); }
             catch (OperationCanceledException) { return Results.NoContent(); } // il daemon ha chiuso la connessione

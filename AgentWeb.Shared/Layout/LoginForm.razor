@@ -4,24 +4,24 @@
 <div class="login">
     <div class="login-card fade-in">
     <svg class="login-mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.6 10.6 15.4 7.4M8.6 13.4l6.8 3.2" /></svg>
-    <h1 class="h4 mb-1">Accedi ad AgentWeb</h1>
-    <p class="text-muted small mb-4">Persone e agenti, nello stesso spazio.</p>
+    <h1 class="h4 mb-1">@T("login.heading")</h1>
+    <p class="text-muted small mb-4">@T("login.tagline")</p>
     <form @onsubmit="LoginAsync" class="d-flex flex-column gap-2">
         <label class="form-label mb-0" for="login-email">Email</label>
         <input id="login-email" class="form-control" type="email" autocomplete="username" @bind="email" />
         <label class="form-label mb-0" for="login-password">Password</label>
         <input id="login-password" class="form-control" type="password" autocomplete="current-password" @bind="password" />
-        <label class="form-label mb-0" for="login-code">Codice di verifica <span class="text-muted">(se attivo)</span></label>
+        <label class="form-label mb-0" for="login-code">@T("login.code") <span class="text-muted">@T("login.ifEnabled")</span></label>
         <input id="login-code" class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="8" @bind="code" />
         <div class="d-flex gap-2 mt-3">
-            <button class="btn btn-primary" type="submit" disabled="@busy">Accedi</button>
+            <button class="btn btn-primary" type="submit" disabled="@busy">@T("login.signIn")</button>
             @if (canRegister)
             {
-                <button class="btn btn-outline-secondary" type="button" disabled="@busy" @onclick="RegisterAsync">Crea il primo account</button>
+                <button class="btn btn-outline-secondary" type="button" disabled="@busy" @onclick="RegisterAsync">@T("login.createFirst")</button>
             }
         </div>
         @if (error is not null) { <div class="text-danger" role="alert">@error</div> }
-        <p class="text-muted small mt-2 mb-0">@(canRegister ? "Il server non ha ancora account: il primo che crei è amministratore." : "Non hai un account? Chiedilo a un amministratore.")</p>
+        <p class="text-muted small mt-2 mb-0">@T(canRegister ? "login.firstIsAdmin" : "login.askAdmin")</p>
     </form>
     </div>
 </div>

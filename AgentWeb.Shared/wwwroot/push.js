@@ -20,7 +20,7 @@ async function activated(reg) {
     const w = reg.installing || reg.waiting || reg.active;
     if (!w || w.state === "activated") return;
     const done = new Promise(resolve => w.addEventListener("statechange", () => { if (w.state === "activated") resolve(); }));
-    const late = new Promise((_, reject) => setTimeout(() => reject(new Error("Il browser non ha attivato il servizio per le notifiche: ricarica la pagina e riprova.")), 15000));
+    const late = new Promise((_, reject) => setTimeout(() => reject(new Error(document.documentElement.lang === "en" ? "The browser did not start the notification service: reload the page and try again." : "Il browser non ha attivato il servizio per le notifiche: ricarica la pagina e riprova.")), 15000));
     await Promise.race([done, late]);
 }
 

@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Identity;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Web;
 
 // Manutenzione da terminale quando non si riesce più a entrare:
@@ -25,10 +27,10 @@ public static class AccountMaintenance
         if (hadTwoFactor) { await users.SetTwoFactorEnabledAsync(user, false); await users.ResetAuthenticatorKeyAsync(user); }
         var closed = await scope.ServiceProvider.GetRequiredService<SessionStore>().RevokeAllAsync(user.UserName!);
 
-        file ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AgentWeb-credenziali.txt");
-        await File.WriteAllTextAsync(file, $"AgentWeb — account {user.UserName}\nPassword: {password}\n(generata {DateTimeOffset.Now:yyyy-MM-dd HH:mm}; cambiala da Dispositivi → Cambia password, poi elimina questo file)\n");
+        file ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), T("maint.fileName"));
+        await File.WriteAllTextAsync(file, T("maint.file", user.UserName, password, DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm")));
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        Console.WriteLine($"Password di {user.UserName} reimpostata, {closed} sessioni e token chiusi{(hadTwoFactor ? ", verifica in due passaggi disattivata" : "")}. La password è in {file} (leggibile solo da te).");
+        Console.WriteLine(T(hadTwoFactor ? "maint.reset2fa" : "maint.reset", user.UserName, closed, file));
         return 0;
     }
 

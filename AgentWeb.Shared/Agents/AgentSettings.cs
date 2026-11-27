@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
+using static AgentWeb.Shared.Lang;
+
 namespace AgentWeb.Shared.Agents;
 
 // Agente di AgentWeb: nome (da @menzionare), scopo (system prompt), come è raggiungibile e l'LLM che lo fa girare.
@@ -30,13 +32,14 @@ public static class AgentTools
     public const string Collaborate = "collaborate", ReadChannel = "workspace.read", WriteChannel = "workspace.write",
         Web = "web.fetch", Memory = "memory", McpPrefix = "mcp:";
 
-    public static readonly (string Id, string Label, string Help)[] Native =
+    // Proprietà, non campi statici: le etichette seguono la lingua scelta all'avvio.
+    public static (string Id, string Label, string Help)[] Native =>
     [
-        (Collaborate, "Collaborare", "list_agents, ask_agent: consulta gli altri agenti del canale."),
-        (ReadChannel, "Leggere il canale", "read_channel, search_messages, list_tasks."),
-        (WriteChannel, "Agire nel canale", "post_message (aggiornamenti), create_task (affida lavoro a un altro agente del canale)."),
-        (Web, "Leggere il web", "fetch_url: legge pagine pubbliche (mai indirizzi locali o privati)."),
-        (Memory, "Memoria", "remember, recall, forget: ricordi dell'agente e del canale, documenti caricati."),
+        (Collaborate, T("tools.collaborate"), T("tools.collaborate.help")),
+        (ReadChannel, T("tools.read"), "read_channel, search_messages, list_tasks."),
+        (WriteChannel, T("tools.write"), T("tools.write.help")),
+        (Web, T("tools.web"), T("tools.web.help")),
+        (Memory, T("tools.memory"), T("tools.memory.help")),
     ];
 
     public static readonly List<string> Defaults = [Collaborate, ReadChannel, Memory];
@@ -47,11 +50,11 @@ public static class AgentProtocols
 {
     public const string Internal = "internal", A2A = "a2a", Mcp = "mcp";
 
-    public static readonly (string Value, string Label, string Help)[] All =
+    public static (string Value, string Label, string Help)[] All =>
     [
-        (Internal, "Interno", "Solo dentro AgentWeb: canali, task e deleghe tra agenti."),
-        (A2A, "A2A", "Anche come agente A2A (Agent Card su /a2a/<nome>): lo chiamano altri sistemi con un token API."),
-        (Mcp, "MCP", "Anche come agente chiamabile da Claude, Hermes e altri client MCP (tool ask_agent su /mcp)."),
+        (Internal, T("protocol.internal"), T("protocol.internal.help")),
+        (A2A, "A2A", T("protocol.a2a.help")),
+        (Mcp, "MCP", T("protocol.mcp.help")),
     ];
 }
 
@@ -62,14 +65,14 @@ public static class LlmKinds
         OpenAI = "openai", Anthropic = "anthropic",
         Daemon = "daemon"; // sul computer di un utente: Url = l'utente (email), DefaultModel = il runtime del suo daemon
 
-    public static readonly (string Kind, string Label, string DefaultUrl, bool NeedsKey)[] All =
+    public static (string Kind, string Label, string DefaultUrl, bool NeedsKey)[] All =>
     [
-        (OllamaLocal, "Ollama locale", "http://localhost:11434", false),
-        (OllamaRemote, "Ollama remoto", "http://server:11434", false),
+        (OllamaLocal, T("llmKind.ollamaLocal"), "http://localhost:11434", false),
+        (OllamaRemote, T("llmKind.ollamaRemote"), "http://server:11434", false),
         (OllamaCloud, "Ollama Cloud", "https://ollama.com", true),
-        (OpenAI, "Compatibile OpenAI (OpenAI, LM Studio, vLLM, OpenRouter…)", "https://api.openai.com/v1", true),
+        (OpenAI, T("llmKind.openai"), "https://api.openai.com/v1", true),
         (Anthropic, "Anthropic (Claude)", "https://api.anthropic.com", true),
-        (Daemon, "Computer di un utente (agentweb daemon: claude, codex…)", "", false),
+        (Daemon, T("llmKind.daemon"), "", false),
     ];
 
     public static bool IsOllama(string kind) => kind is OllamaLocal or OllamaRemote or OllamaCloud;
@@ -109,8 +112,8 @@ public sealed partial class AgentSettings
 {
     public List<LocalAgentConfig> LocalAgents { get; set; } =
     [
-        new() { Name = "Architetto", Prompt = "Sei un architetto software. Proponi e migliora soluzioni concrete. Usa i tool disponibili se servono. Rispondi in italiano, massimo 120 parole." },
-        new() { Name = "Critico", Prompt = "Sei un revisore di sicurezza e affidabilità. Trova i punti deboli dell'ultima proposta e suggerisci correzioni. Rispondi in italiano, massimo 120 parole." },
+        new() { Name = T("defaults.architect"), Prompt = T("defaults.architect.prompt") },
+        new() { Name = T("defaults.critic"), Prompt = T("defaults.critic.prompt") },
     ];
     public List<McpServerConfig> McpServers { get; set; } = [];
     public List<A2AAgentConfig> A2AAgents { get; set; } = [];
@@ -155,48 +158,48 @@ public sealed partial class AgentSettings
         foreach (var a in LocalAgents.Where(a => a.Enabled))
         {
             var p = a.Llm;
-            if (LlmKinds.All.All(k => k.Kind != p.Kind)) errors.Add($"Agente \"{a.Name}\": tipo di LLM \"{p.Kind}\" sconosciuto.");
+            if (LlmKinds.All.All(k => k.Kind != p.Kind)) errors.Add(T("val.llmKind", a.Name, p.Kind));
             if (p.Kind == LlmKinds.Daemon ? !p.Url.Contains('@') : !IsHttpUrl(p.Url))
-                errors.Add(p.Kind == LlmKinds.Daemon ? $"Agente \"{a.Name}\": indica l'utente (email) sul cui computer gira il daemon." : $"Agente \"{a.Name}\": URL dell'LLM non valido.");
+                errors.Add(T(p.Kind == LlmKinds.Daemon ? "val.daemonUser" : "val.llmUrl", a.Name));
             if (p.Kind is LlmKinds.OllamaCloud or LlmKinds.Anthropic && string.IsNullOrWhiteSpace(p.ApiKey))
-                errors.Add($"Agente \"{a.Name}\": serve il token API.");
-            if (string.IsNullOrWhiteSpace(p.DefaultModel)) errors.Add($"Agente \"{a.Name}\": scegli il modello.");
-            if (AgentProtocols.All.All(x => x.Value != a.Protocol)) errors.Add($"Agente \"{a.Name}\": protocollo \"{a.Protocol}\" sconosciuto.");
+                errors.Add(T("val.apiKey", a.Name));
+            if (string.IsNullOrWhiteSpace(p.DefaultModel)) errors.Add(T("val.model", a.Name));
+            if (AgentProtocols.All.All(x => x.Value != a.Protocol)) errors.Add(T("val.protocol", a.Name, a.Protocol));
             foreach (var t in a.Tools ?? [])
             {
                 if (t.StartsWith(AgentTools.McpPrefix) ? McpServers.All(m => !m.Name.Equals(t[AgentTools.McpPrefix.Length..], StringComparison.OrdinalIgnoreCase))
                                                        : AgentTools.Native.All(n => n.Id != t))
-                    errors.Add($"Agente \"{a.Name}\": strumento \"{t}\" inesistente.");
+                    errors.Add(T("val.tool", a.Name, t));
             }
         }
         void Names(IEnumerable<string> names, string kind)
         {
-            foreach (var n in names.Where(string.IsNullOrWhiteSpace)) errors.Add($"{kind}: nome obbligatorio.");
+            foreach (var n in names.Where(string.IsNullOrWhiteSpace)) errors.Add(T("val.nameRequired", kind));
             foreach (var d in names.Where(n => !string.IsNullOrWhiteSpace(n)).GroupBy(n => n.Trim(), StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
-                errors.Add($"{kind}: nome duplicato \"{d.Key}\".");
+                errors.Add(T("val.nameDuplicate", kind, d.Key));
         }
         Names(McpServers.Select(s => s.Name), "MCP");
         // Agenti locali e A2A condividono i nomi: sono quelli che si @menzionano nei canali.
-        Names(LocalAgents.Select(a => a.Name).Concat(A2AAgents.Select(a => a.Name)), "Agenti");
+        Names(LocalAgents.Select(a => a.Name).Concat(A2AAgents.Select(a => a.Name)), T("settings.agents"));
         foreach (var n in LocalAgents.Select(a => a.Name).Concat(A2AAgents.Select(a => a.Name)).Where(n => !string.IsNullOrWhiteSpace(n) && !AgentName().IsMatch(n)))
-            errors.Add($"Agente \"{n}\": usa solo lettere, numeri, _ e - (serve per @{n.Replace(" ", "")}).");
+            errors.Add(T("val.agentName", n, n.Replace(" ", "")));
         foreach (var a in LocalAgents.Where(a => string.IsNullOrWhiteSpace(a.Prompt)))
-            errors.Add($"Agente \"{a.Name}\": scrivi il suo scopo.");
+            errors.Add(T("val.prompt", a.Name));
 
         foreach (var s in McpServers)
         {
             if (s.Transport == "stdio")
             {
-                if (!allowStdio) errors.Add($"MCP \"{s.Name}\": stdio consentito solo in Development.");
-                if (string.IsNullOrWhiteSpace(s.Command)) errors.Add($"MCP \"{s.Name}\": comando obbligatorio.");
+                if (!allowStdio) errors.Add(T("val.stdio", s.Name));
+                if (string.IsNullOrWhiteSpace(s.Command)) errors.Add(T("val.command", s.Name));
             }
-            else if (!IsHttpUrl(s.Url)) errors.Add($"MCP \"{s.Name}\": URL http(s) non valido.");
+            else if (!IsHttpUrl(s.Url)) errors.Add(T("val.url", "MCP", s.Name));
 
             foreach (var line in HeaderLines(s.Headers).Where(l => !l.Contains(':')))
-                errors.Add($"MCP \"{s.Name}\": header \"{line}\" non nel formato Chiave: Valore.");
+                errors.Add(T("val.header", s.Name, line));
         }
         foreach (var a in A2AAgents.Where(a => !IsHttpUrl(a.Url)))
-            errors.Add($"A2A \"{a.Name}\": URL http(s) non valido.");
+            errors.Add(T("val.url", "A2A", a.Name));
         return errors;
     }
 

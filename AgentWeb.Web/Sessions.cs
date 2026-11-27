@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using static AgentWeb.Shared.Lang;
 
 namespace AgentWeb.Web;
 
@@ -40,7 +41,7 @@ public sealed class SessionStore(IDbContextFactory<AppDb> dbf, SessionConnection
     public async Task<ApiTokenDto> CreateTokenAsync(string userName, string name)
     {
         name = name?.Trim() ?? "";
-        if (name.Length is 0 or > 100) throw new ArgumentException("Nome del token: da 1 a 100 caratteri.");
+        if (name.Length is 0 or > 100) throw new ArgumentException(T("token.nameLength"));
         var secret = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         await using var db = await dbf.CreateDbContextAsync();
         var s = new UserSessionEntity
@@ -142,7 +143,7 @@ public static class SessionValidation
             if (ctx.Options.BearerTokenProtector.Unprotect(header["Bearer ".Length..].Trim()) is not { } ticket) return; // token non valido: lo rifiuta il handler
             var sessions = ctx.HttpContext.RequestServices.GetRequiredService<SessionStore>();
             if (!await sessions.IsActiveAsync(ticket.Principal.FindFirstValue(SessionStore.Claim), ticket.Principal.Identity?.Name))
-                ctx.Fail("Sessione revocata o scaduta.");
+                ctx.Fail(T("auth.sessionRevoked"));
         };
     }
 }
@@ -159,8 +160,8 @@ public sealed class ApiTokenAuthenticationHandler(IOptionsMonitor<Authentication
     {
         var header = Request.Headers.Authorization.ToString();
         if (!header.StartsWith("Bearer " + SessionStore.TokenPrefix, StringComparison.Ordinal)) return AuthenticateResult.NoResult();
-        if (await sessions.ValidateTokenAsync(header["Bearer ".Length..].Trim()) is not { } t) return AuthenticateResult.Fail("Token non valido o revocato.");
-        if (await users.FindByNameAsync(t.UserName) is not { } user) return AuthenticateResult.Fail("Utente inesistente.");
+        if (await sessions.ValidateTokenAsync(header["Bearer ".Length..].Trim()) is not { } t) return AuthenticateResult.Fail(T("auth.tokenInvalid"));
+        if (await users.FindByNameAsync(t.UserName) is not { } user) return AuthenticateResult.Fail(T("auth.noUser"));
         var principal = await signIn.CreateUserPrincipalAsync(user);
         ((ClaimsIdentity)principal.Identity!).AddClaim(new(SessionStore.Claim, t.Sid));
         return AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme));
@@ -253,7 +254,7 @@ public static class TwoFactor
         {
             if (await users.FindByNameAsync(u.Identity!.Name!) is not { } user) return Results.Unauthorized();
             if (await users.GetTwoFactorEnabledAsync(user)) return Results.NoContent();
-            if (!await VerifyAsync(users, user, req.Code)) return Results.Text("Codice non valido: controlla l'ora del telefono e riprova.", statusCode: 400);
+            if (!await VerifyAsync(users, user, req.Code)) return Results.Text(T("2fa.badCodeClock"), statusCode: 400);
             await users.SetTwoFactorEnabledAsync(user, true);
             return Results.NoContent();
         }).RequireRateLimiting(SessionEndpoints.AuthRateLimit); // i tentativi sui codici costano come quelli sulle password
@@ -262,7 +263,7 @@ public static class TwoFactor
         {
             if (await users.FindByNameAsync(u.Identity!.Name!) is not { } user) return Results.Unauthorized();
             if (!await users.GetTwoFactorEnabledAsync(user)) return Results.NoContent();
-            if (!await VerifyAsync(users, user, req.Code)) return Results.Text("Codice non valido.", statusCode: 400);
+            if (!await VerifyAsync(users, user, req.Code)) return Results.Text(T("2fa.badCode"), statusCode: 400);
             await users.SetTwoFactorEnabledAsync(user, false);
             await users.ResetAuthenticatorKeyAsync(user); // la prossima attivazione usa una chiave nuova
             return Results.NoContent();

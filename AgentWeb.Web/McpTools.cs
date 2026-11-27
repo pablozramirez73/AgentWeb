@@ -3,6 +3,8 @@ using AgentWeb.Shared.Agents;
 using AgentWeb.Shared.Workspace;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
+using AgentWeb.Shared;
+using static AgentWeb.Shared.Lang;
 
 namespace AgentWeb.Web;
 
@@ -11,15 +13,15 @@ namespace AgentWeb.Web;
 [McpServerToolType]
 public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, AgentSettingsStore settings, IHttpContextAccessor http)
 {
-    string User => http.HttpContext?.User.Identity?.Name ?? throw new McpException("Non autenticato.");
+    string User => http.HttpContext?.User.Identity?.Name ?? throw new McpException(T("mcp.err.unauthenticated"));
 
-    [McpServerTool(Name = "list_channels", ReadOnly = true), Description("Elenca i canali del workspace AgentWeb visibili all'utente (id, nome, privato).")]
+    [McpServerTool(Name = "list_channels", ReadOnly = true), LDescription("mcp.list_channels")]
     public Task<List<ChannelDto>> ListChannels() => Run(() => store.GetChannelsAsync(User));
 
-    [McpServerTool(Name = "read_messages", ReadOnly = true), Description("Legge i messaggi di un canale (gli ultimi 200, o solo quelli successivi a since_id).")]
+    [McpServerTool(Name = "read_messages", ReadOnly = true), LDescription("mcp.read_messages")]
     public Task<List<MessageDto>> ReadMessages(
-        [Description("Id o nome del canale")] string channel,
-        [Description("Restituisce solo i messaggi con id maggiore di questo (facoltativo)")] long? since_id = null) => Run(async () =>
+        [LDescription("mcp.channel")] string channel,
+        [LDescription("mcp.read_messages.since_id")] long? since_id = null) => Run(async () =>
     {
         var id = await ChannelAsync(channel);
         if (since_id is not { } since) return await store.GetMessagesAsync(id, User);
@@ -27,30 +29,30 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         return replay.Reset ? await store.GetMessagesAsync(id, User) : replay.Messages;
     });
 
-    [McpServerTool(Name = "send_message"), Description("Scrive un messaggio in un canale. Per coinvolgere un agente AgentWeb scrivi @NomeAgente nel testo.")]
-    public Task<MessageDto> SendMessage([Description("Id o nome del canale")] string channel, [Description("Testo del messaggio")] string text) =>
+    [McpServerTool(Name = "send_message"), LDescription("mcp.send_message")]
+    public Task<MessageDto> SendMessage([LDescription("mcp.channel")] string channel, [LDescription("mcp.send_message.text")] string text) =>
         Run(async () => await store.PostUserMessageAsync(await ChannelAsync(channel), User, text));
 
-    [McpServerTool(Name = "list_tasks", ReadOnly = true), Description("Elenca i task di un canale con stato, assegnatario e risultato.")]
-    public Task<List<TaskDto>> ListTasks([Description("Id o nome del canale")] string channel) =>
+    [McpServerTool(Name = "list_tasks", ReadOnly = true), LDescription("mcp.list_tasks")]
+    public Task<List<TaskDto>> ListTasks([LDescription("mcp.channel")] string channel) =>
         Run(async () => await store.GetTasksAsync(await ChannelAsync(channel), User));
 
-    [McpServerTool(Name = "create_task"), Description("Crea un task in un canale. Se assegnato a un agente AgentWeb, l'agente lo svolge e scrive il risultato nel canale.")]
+    [McpServerTool(Name = "create_task"), LDescription("mcp.create_task")]
     public Task<TaskDto> CreateTask(
-        [Description("Id o nome del canale")] string channel,
-        [Description("Titolo del task")] string title,
-        [Description("Descrizione (facoltativa)")] string? description = null,
-        [Description("Nome di un agente AgentWeb, oppure 'me' per l'utente (facoltativo)")] string? assignee = null) =>
+        [LDescription("mcp.channel")] string channel,
+        [LDescription("mcp.create_task.title")] string title,
+        [LDescription("mcp.create_task.description")] string? description = null,
+        [LDescription("mcp.create_task.assignee")] string? assignee = null) =>
         Run(async () => await store.CreateTaskAsync(await ChannelAsync(channel), new NewTaskRequest(title, description ?? "", assignee == "me" ? NewTaskRequest.Me : assignee), User));
 
-    [McpServerTool(Name = "set_task_status"), Description("Segna un task come fatto ('done') o lo riapre ('todo'). I task degli agenti si chiudono da soli.")]
-    public Task<string> SetTaskStatus([Description("Id del task")] int task_id, [Description("'done' oppure 'todo'")] string status) => Run(async () =>
+    [McpServerTool(Name = "set_task_status"), LDescription("mcp.set_task_status")]
+    public Task<string> SetTaskStatus([LDescription("mcp.set_task_status.task_id")] int task_id, [LDescription("mcp.set_task_status.status")] string status) => Run(async () =>
     {
         var s = status.Trim().ToLowerInvariant() switch
         {
             "done" => WorkStatus.Done,
             "todo" => WorkStatus.Todo,
-            _ => throw new McpException("status deve essere 'done' o 'todo'."),
+            _ => throw new McpException(T("mcp.err.status")),
         };
         await store.SetStatusByUserAsync(task_id, s, User);
         return $"Task #{task_id}: {status}.";
@@ -59,28 +61,28 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
     // Solo gli agenti con protocollo "MCP" sono raggiungibili da qui (gli altri restano interni o su A2A).
     List<LocalAgentConfig> McpAgents() => settings.Get().LocalAgents.Where(a => a.Enabled && a.Protocol == AgentProtocols.Mcp).ToList();
 
-    [McpServerTool(Name = "list_agents", ReadOnly = true), Description("Elenca gli agenti AgentWeb raggiungibili via MCP, con il loro scopo.")]
+    [McpServerTool(Name = "list_agents", ReadOnly = true), LDescription("mcp.list_agents")]
     public List<string> ListAgents() => McpAgents().Select(a => $"{a.Name}: {a.Prompt}").ToList();
 
-    [McpServerTool(Name = "ask_agent"), Description("Fa una domanda a un agente AgentWeb in un canale e aspetta la sua risposta (scrive '@agente domanda' come l'utente).")]
+    [McpServerTool(Name = "ask_agent"), LDescription("mcp.ask_agent")]
     public Task<string> AskAgent(
-        [Description("Nome dell'agente (vedi list_agents)")] string agent,
-        [Description("Id o nome del canale dove porre la domanda")] string channel,
-        [Description("La domanda o la richiesta")] string question,
-        [Description("Secondi massimi di attesa (default 180)")] int timeout_seconds = 180) => Run(async () =>
+        [LDescription("mcp.ask_agent.agent")] string agent,
+        [LDescription("mcp.ask_agent.channel")] string channel,
+        [LDescription("mcp.ask_agent.question")] string question,
+        [LDescription("mcp.ask_agent.timeout_seconds")] int timeout_seconds = 180) => Run(async () =>
     {
         var name = McpAgents().Select(a => a.Name).FirstOrDefault(a => a.Equals(agent.TrimStart('@'), StringComparison.OrdinalIgnoreCase))
-            ?? throw new McpException($"Agente \"{agent}\" inesistente o non raggiungibile via MCP (protocollo diverso da MCP).");
+            ?? throw new McpException(T("mcp.err.agentNotMcp", agent));
         var id = await ChannelAsync(channel);
         if (!(await store.ChannelAgentNamesAsync(id)).Contains(name, StringComparer.OrdinalIgnoreCase))
-            throw new McpException($"{name} non è un agente del canale \"{channel}\": chi ha creato il canale può aggiungerlo.");
+            throw new McpException(T("mcp.err.agentNotInChannel", name, channel));
         long after = 0; // diventa l'id della domanda appena scritta: le risposte arrivano sempre dopo
         var reply = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnEvent(WorkspaceEvent e)
         {
             if (e is not { Kind: "message", Message: { } m } || m.ChannelId != id || m.Id <= Volatile.Read(ref after)) return;
             if (m.Kind == AuthorKind.Agent && m.Author.Equals(name, StringComparison.OrdinalIgnoreCase)) reply.TrySetResult(m.Text);
-            else if (m.Kind == AuthorKind.System && m.Text.StartsWith($"{name} non ha potuto rispondere", StringComparison.OrdinalIgnoreCase))
+            else if (m.Kind == AuthorKind.System && m.Text.StartsWith(T("agent.couldNotAnswer", name, "").TrimEnd(' ', ':'), StringComparison.OrdinalIgnoreCase))
                 reply.TrySetException(new McpException(m.Text));
         }
         bus.Published += OnEvent; // prima di scrivere: la risposta non può arrivare prima che ascoltiamo
@@ -92,39 +94,39 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         }
         catch (TimeoutException)
         {
-            return $"{name} non ha ancora risposto: la risposta comparirà nel canale (usa read_messages).";
+            return T("mcp.notYetAnswered", name);
         }
         finally { bus.Published -= OnEvent; }
     });
 
-    [McpServerTool(Name = "create_channel"), Description("Crea un canale (ne diventi il creatore: solo tu scegli i suoi agenti). Restituisce id e nome.")]
+    [McpServerTool(Name = "create_channel"), LDescription("mcp.create_channel")]
     public Task<ChannelDto> CreateChannel(
-        [Description("Nome del canale (spazi diventano trattini)")] string name,
-        [Description("true = privato, lo vedono solo i membri (default false)")] bool @private = false) =>
+        [LDescription("mcp.create_channel.name")] string name,
+        [LDescription("mcp.create_channel.private")] bool @private = false) =>
         Run(() => store.CreateChannelAsync(name, User, @private));
 
-    [McpServerTool(Name = "add_agent_to_channel"), Description("Aggiunge un agente AgentWeb a un canale che hai creato: da lì risponde alle @menzioni e svolge i task.")]
-    public Task<string> AddAgentToChannel([Description("Nome dell'agente")] string agent, [Description("Id o nome del canale")] string channel) => Run(async () =>
+    [McpServerTool(Name = "add_agent_to_channel"), LDescription("mcp.add_agent_to_channel")]
+    public Task<string> AddAgentToChannel([LDescription("mcp.add_agent_to_channel.agent")] string agent, [LDescription("mcp.channel")] string channel) => Run(async () =>
     {
         await store.AddChannelAgentAsync(await ChannelAsync(channel), User, agent);
-        return $"{agent.TrimStart('@')} è un agente del canale {channel}.";
+        return T("mcp.agentAdded", agent.TrimStart('@'), channel);
     });
 
     // Solo amministratori, e niente URL o chiavi via MCP: il nuovo agente usa l'LLM (server e token) di un agente già configurato.
-    [McpServerTool(Name = "create_agent"), Description("Solo amministratori. Crea un agente AgentWeb che usa lo stesso LLM di un agente esistente (eventualmente con un altro modello).")]
+    [McpServerTool(Name = "create_agent"), LDescription("mcp.create_agent")]
     public Task<string> CreateAgent(
-        [Description("Nome (lettere, numeri, _ e -): si menziona con @nome")] string name,
-        [Description("Scopo dell'agente: diventa il suo system prompt")] string purpose,
-        [Description("Agente esistente di cui usare l'LLM (default: il primo agente abilitato)")] string? like = null,
-        [Description("Modello diverso da quello dell'agente copiato (facoltativo)")] string? model = null,
-        [Description("'internal' (default), 'mcp' (chiamabile con ask_agent) oppure 'a2a'")] string protocol = AgentProtocols.Internal,
-        [Description("Canale (id o nome) a cui aggiungerlo subito, se l'hai creato tu (facoltativo)")] string? channel = null) => Run(async () =>
+        [LDescription("mcp.create_agent.name")] string name,
+        [LDescription("mcp.create_agent.purpose")] string purpose,
+        [LDescription("mcp.create_agent.like")] string? like = null,
+        [LDescription("mcp.create_agent.model")] string? model = null,
+        [LDescription("mcp.create_agent.protocol")] string protocol = AgentProtocols.Internal,
+        [LDescription("mcp.create_agent.channel")] string? channel = null) => Run(async () =>
     {
-        RequireAdmin("creare agenti");
+        RequireAdmin("mcp.admin.createAgents");
         var s = settings.Get();
         var source = (like is null ? s.LocalAgents.FirstOrDefault(a => a.Enabled) : s.FindLocal(like.TrimStart('@')))
-            ?? throw new McpException(like is null ? "Nessun agente esistente da cui copiare l'LLM: creane uno dalla pagina Agenti." : $"Agente \"{like}\" inesistente o disabilitato.");
-        if (AgentProtocols.All.All(x => x.Value != protocol)) throw new McpException("protocol deve essere 'internal', 'mcp' o 'a2a'.");
+            ?? throw new McpException(like is null ? T("mcp.err.noSourceAgent") : T("ws.agentNotFound", like));
+        if (AgentProtocols.All.All(x => x.Value != protocol)) throw new McpException(T("mcp.err.protocol"));
         var src = source.Llm;
         s.LocalAgents.Add(new()
         {
@@ -134,78 +136,80 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         SaveSettings(s);
         var created = s.LocalAgents[^1];
         if (channel is not null) await store.AddChannelAgentAsync(await ChannelAsync(channel), User, created.Name);
-        return $"Agente {created.Name} creato (LLM di {source.Name}, modello {created.Llm.DefaultModel})" + (channel is null ? "." : $" e aggiunto al canale {channel}.");
+        return channel is null ? T("mcp.agentCreated", created.Name, source.Name, created.Llm.DefaultModel)
+            : T("mcp.agentCreatedIn", created.Name, source.Name, created.Llm.DefaultModel, channel);
     });
 
-    [McpServerTool(Name = "add_member"), Description("Aggiunge una persona (email) a un canale privato che vedi.")]
-    public Task<string> AddMember([Description("Id o nome del canale")] string channel, [Description("Email dell'utente AgentWeb")] string user) => Run(async () =>
+    [McpServerTool(Name = "add_member"), LDescription("mcp.add_member")]
+    public Task<string> AddMember([LDescription("mcp.channel")] string channel, [LDescription("mcp.add_member.user")] string user) => Run(async () =>
     {
         await store.AddMemberAsync(await ChannelAsync(channel), User, user.Trim());
-        return $"{user.Trim()} è membro del canale {channel}.";
+        return T("mcp.memberAdded", user.Trim(), channel);
     });
 
-    [McpServerTool(Name = "remove_member"), Description("Toglie una persona da un canale privato (solo chi l'ha creato), oppure ti fa uscire se indichi te stesso.")]
-    public Task<string> RemoveMember([Description("Id o nome del canale")] string channel, [Description("Email dell'utente")] string user) => Run(async () =>
+    [McpServerTool(Name = "remove_member"), LDescription("mcp.remove_member")]
+    public Task<string> RemoveMember([LDescription("mcp.channel")] string channel, [LDescription("mcp.remove_member.user")] string user) => Run(async () =>
     {
         await store.RemoveMemberAsync(await ChannelAsync(channel), User, user.Trim());
-        return $"{user.Trim()} non è più membro del canale {channel}.";
+        return T("mcp.memberRemoved", user.Trim(), channel);
     });
 
+    // what: chiave i18n dell'azione.
     void RequireAdmin(string what)
     {
-        if (http.HttpContext?.User.IsInRole(AccountEndpoints.AdminRole) != true) throw new McpException($"Solo un amministratore può {what}.");
+        if (http.HttpContext?.User.IsInRole(AccountEndpoints.AdminRole) != true) throw new McpException(T("mcp.err.adminOnly", T(what)));
     }
 
     // Come create_agent: niente server o chiavi dell'LLM via MCP, solo ciò che si sceglie nella scheda dell'agente.
-    [McpServerTool(Name = "update_agent"), Description("Solo amministratori. Modifica un agente AgentWeb: scopo, modello, protocollo, abilitato. I campi omessi restano com'erano.")]
+    [McpServerTool(Name = "update_agent"), LDescription("mcp.update_agent")]
     public Task<string> UpdateAgent(
-        [Description("Nome dell'agente")] string name,
-        [Description("Nuovo scopo (system prompt)")] string? purpose = null,
-        [Description("Nuovo modello (dello stesso server LLM)")] string? model = null,
-        [Description("'internal', 'mcp' oppure 'a2a'")] string? protocol = null,
-        [Description("true = abilitato, false = disabilitato")] bool? enabled = null) => Run(async () =>
+        [LDescription("mcp.update_agent.name")] string name,
+        [LDescription("mcp.update_agent.purpose")] string? purpose = null,
+        [LDescription("mcp.update_agent.model")] string? model = null,
+        [LDescription("mcp.update_agent.protocol")] string? protocol = null,
+        [LDescription("mcp.update_agent.enabled")] bool? enabled = null) => Run(async () =>
     {
-        RequireAdmin("modificare gli agenti");
+        RequireAdmin("mcp.admin.updateAgents");
         var s = settings.Get();
         var a = s.LocalAgents.FirstOrDefault(x => x.Name.Equals(name.TrimStart('@'), StringComparison.OrdinalIgnoreCase))
-            ?? throw new McpException($"Agente \"{name}\" inesistente.");
-        if (protocol is not null && AgentProtocols.All.All(x => x.Value != protocol)) throw new McpException("protocol deve essere 'internal', 'mcp' o 'a2a'.");
+            ?? throw new McpException(T("mcp.err.agentMissing", name));
+        if (protocol is not null && AgentProtocols.All.All(x => x.Value != protocol)) throw new McpException(T("mcp.err.protocol"));
         if (purpose is not null) a.Prompt = purpose.Trim();
         if (!string.IsNullOrWhiteSpace(model)) a.Llm.DefaultModel = model.Trim();
         if (protocol is not null) a.Protocol = protocol;
         if (enabled is { } e) a.Enabled = e;
         SaveSettings(s);
         await Task.CompletedTask;
-        return $"Agente {a.Name}: modello {a.Llm.DefaultModel}, protocollo {a.Protocol}, {(a.Enabled ? "abilitato" : "disabilitato")}.";
+        return T("mcp.agentUpdated", a.Name, a.Llm.DefaultModel, a.Protocol, T(a.Enabled ? "mcp.enabled" : "mcp.disabled"));
     });
 
-    [McpServerTool(Name = "add_a2a_agent"), Description("Solo amministratori. Collega un agente esterno via A2A (Agent Card in <url>/.well-known/agent-card.json): poi si @menziona e si aggiunge ai canali come gli altri.")]
+    [McpServerTool(Name = "add_a2a_agent"), LDescription("mcp.add_a2a_agent")]
     public Task<string> AddA2AAgent(
-        [Description("Nome con cui menzionarlo (lettere, numeri, _ e -)")] string name,
-        [Description("URL base dell'agente A2A, raggiungibile dal server")] string url,
-        [Description("Bearer token, se l'agente lo chiede (facoltativo)")] string? token = null) => Run(async () =>
+        [LDescription("mcp.add_a2a_agent.name")] string name,
+        [LDescription("mcp.add_a2a_agent.url")] string url,
+        [LDescription("mcp.add_a2a_agent.token")] string? token = null) => Run(async () =>
     {
-        RequireAdmin("collegare agenti A2A");
+        RequireAdmin("mcp.admin.connectA2A");
         var peer = new A2AAgentConfig { Name = name.Trim().TrimStart('@'), Url = url.Trim(), BearerToken = token?.Trim() ?? "" };
         string card;
         try { card = await settings.TestA2AAsync(peer).WaitAsync(TimeSpan.FromSeconds(30)); } // prima di salvare: un URL sbagliato si vede subito
-        catch (Exception e) { throw new McpException($"Agent Card non raggiungibile su {peer.Url}: {e.GetBaseException().Message}"); }
+        catch (Exception e) { throw new McpException(T("mcp.err.cardUnreachable", peer.Url, e.GetBaseException().Message)); }
         var s = settings.Get();
         s.A2AAgents.Add(peer);
         SaveSettings(s);
-        return $"Agente A2A {peer.Name} collegato: {card}";
+        return T("mcp.a2aConnected", peer.Name, card);
     });
 
-    [McpServerTool(Name = "remove_a2a_agent"), Description("Solo amministratori. Scollega un agente A2A esterno.")]
-    public Task<string> RemoveA2AAgent([Description("Nome dell'agente A2A")] string name) => Run(async () =>
+    [McpServerTool(Name = "remove_a2a_agent"), LDescription("mcp.remove_a2a_agent")]
+    public Task<string> RemoveA2AAgent([LDescription("mcp.remove_a2a_agent.name")] string name) => Run(async () =>
     {
-        RequireAdmin("scollegare agenti A2A");
+        RequireAdmin("mcp.admin.disconnectA2A");
         var s = settings.Get();
         if (s.A2AAgents.RemoveAll(a => a.Name.Equals(name.TrimStart('@'), StringComparison.OrdinalIgnoreCase)) == 0)
-            throw new McpException($"Nessun agente A2A si chiama \"{name}\".");
+            throw new McpException(T("mcp.err.noA2A", name));
         SaveSettings(s);
         await Task.CompletedTask;
-        return $"Agente A2A {name.TrimStart('@')} scollegato.";
+        return T("mcp.a2aDisconnected", name.TrimStart('@'));
     });
 
     // shortcut: legge e riscrive le impostazioni intere; un salvataggio contemporaneo dalla pagina Agenti può sovrascriverlo.
@@ -216,31 +220,31 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
     }
 
     // Documenti: la memoria del canale che gli agenti consultano (stessi permessi della pagina Memoria del canale).
-    [McpServerTool(Name = "list_documents", ReadOnly = true), Description("Elenca i documenti caricati nella memoria di un canale (id, titolo, autore, parti).")]
-    public Task<List<string>> ListDocuments([Description("Id o nome del canale")] string channel) => Run(async () =>
+    [McpServerTool(Name = "list_documents", ReadOnly = true), LDescription("mcp.list_documents")]
+    public Task<List<string>> ListDocuments([LDescription("mcp.channel")] string channel) => Run(async () =>
         (await store.GetChannelMemoryAsync(await ChannelAsync(channel), User)).Where(m => m.Kind == "document")
-            .Select(d => $"{d.SourceId}: «{d.Title}» di {d.CreatedBy}, {d.CreatedAt:yyyy-MM-dd}, {d.Chunks} parti").ToList());
+            .Select(d => T("mcp.documentLine", d.SourceId, d.Title, d.CreatedBy, d.CreatedAt.ToString("yyyy-MM-dd"), d.Chunks)).ToList());
 
-    [McpServerTool(Name = "upload_document"), Description("Carica un documento di testo (anche Markdown) nella memoria di un canale: gli agenti del canale lo useranno per rispondere.")]
+    [McpServerTool(Name = "upload_document"), LDescription("mcp.upload_document")]
     public Task<string> UploadDocument(
-        [Description("Id o nome del canale")] string channel,
-        [Description("Titolo o nome del file")] string title,
-        [Description("Testo del documento (massimo circa 1 MB)")] string text) => Run(async () =>
+        [LDescription("mcp.channel")] string channel,
+        [LDescription("mcp.upload_document.title")] string title,
+        [LDescription("mcp.upload_document.text")] string text) => Run(async () =>
     {
         var parts = await store.UploadDocumentAsync(await ChannelAsync(channel), User, title, text);
-        return $"«{title}» caricato nella memoria del canale ({parts} parti).";
+        return T("mcp.documentUploaded", title, parts);
     });
 
-    [McpServerTool(Name = "search_documents", ReadOnly = true), Description("Cerca per significato nei documenti e nelle note della memoria di un canale; restituisce i passaggi più pertinenti.")]
+    [McpServerTool(Name = "search_documents", ReadOnly = true), LDescription("mcp.search_documents")]
     public Task<List<string>> SearchDocuments(
-        [Description("Id o nome del canale")] string channel,
-        [Description("Cosa cerchi, in parole tue")] string query,
-        [Description("Quanti passaggi al massimo (1-20, default 5)")] int limit = 5) => Run(async () =>
+        [LDescription("mcp.channel")] string channel,
+        [LDescription("mcp.search_documents.query")] string query,
+        [LDescription("mcp.search_documents.limit")] int limit = 5) => Run(async () =>
         (await store.SearchChannelMemoryAsync(await ChannelAsync(channel), User, query, Math.Clamp(limit, 1, 20)))
             .Select(h => $"[{h.Title ?? h.Kind}] {h.Content}").ToList());
 
-    [McpServerTool(Name = "delete_document"), Description("Elimina un documento dalla memoria di un canale. Può farlo chi l'ha caricato o chi ha creato il canale.")]
-    public Task<string> DeleteDocument([Description("Id o nome del canale")] string channel, [Description("Id del documento (vedi list_documents) o titolo esatto")] string document) => Run(async () =>
+    [McpServerTool(Name = "delete_document"), LDescription("mcp.delete_document")]
+    public Task<string> DeleteDocument([LDescription("mcp.channel")] string channel, [LDescription("mcp.delete_document.document")] string document) => Run(async () =>
     {
         var id = await ChannelAsync(channel);
         var docs = (await store.GetChannelMemoryAsync(id, User)).Where(m => m.Kind == "document").ToList();
@@ -249,11 +253,11 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         var doc = matches switch
         {
             [var one] => one,
-            [] => throw new McpException($"Documento «{document}» inesistente in questo canale (vedi list_documents)."),
-            _ => throw new McpException($"Più documenti si chiamano «{document}»: indica l'id (vedi list_documents)."),
+            [] => throw new McpException(T("mcp.err.noDocument", document)),
+            _ => throw new McpException(T("mcp.err.manyDocuments", document)),
         };
         await store.DeleteChannelMemoryAsync(id, User, doc.Id, doc.SourceId);
-        return $"«{doc.Title}» eliminato.";
+        return T("mcp.documentDeleted", doc.Title);
     });
 
     async Task<int> ChannelAsync(string channel)
@@ -261,7 +265,7 @@ public sealed class AgentWebMcpTools(WorkspaceStore store, WorkspaceBus bus, Age
         if (int.TryParse(channel, out var id)) return id;
         var name = channel.TrimStart('#');
         return (await store.GetChannelsAsync(User)).FirstOrDefault(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Id
-            ?? throw new McpException($"Canale \"{channel}\" inesistente.");
+            ?? throw new McpException(T("cli.channelNotFound", channel));
     }
 
     // Errori del dominio come errori MCP leggibili dal modello (le altre eccezioni il SDK le nasconde).

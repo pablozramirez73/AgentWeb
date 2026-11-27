@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using AgentWeb.Shared.Workspace;
+using static AgentWeb.Shared.Lang;
 
 namespace AgentWeb.Cli;
 
@@ -28,7 +29,7 @@ public static class Daemon
     {
         var eq = spec.IndexOf('=');
         var parts = eq > 0 ? spec[(eq + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries) : [];
-        if (eq <= 0 || parts.Length == 0) throw new CliException($"Runtime \"{spec}\": usa nome=comando, es. claude=\"claude -p\".", ExitCodes.Usage);
+        if (eq <= 0 || parts.Length == 0) throw new CliException(T("daemon.badRuntime", spec), ExitCodes.Usage);
         return new(spec[..eq].Trim(), parts[0], parts.Skip(1).ToList());
     }
 
@@ -38,20 +39,20 @@ public static class Daemon
         var byName = runtimes.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
         var done = new ConcurrentDictionary<string, DaemonResult>(); // consegne già eseguite: una riconsegna non rilancia il runtime
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(env.Cancel);
-        env.Err.WriteLine($"daemon: {machine} in ascolto per {api.UserName} su {api.Server} (runtime: {string.Join(", ", byName.Keys)}{(asUser is null ? "" : ", come " + asUser)})");
+        env.Err.WriteLine(T(asUser is null ? "daemon.listening" : "daemon.listeningAs", machine, api.UserName, api.Server, string.Join(", ", byName.Keys), asUser));
         return await RunWorkersAsync(api, env, byName, done, stop, machine, passEnv, parallel, asUser);
     }
 
     // Errori d'uso prima di qualsiasi richiesta al server (anche da `daemon install`).
     public static void CheckOptions(int runtimes, List<string> passEnv, string? asUser)
     {
-        if (runtimes == 0) throw new CliException("Indica almeno un --runtime nome=comando.", ExitCodes.Usage);
+        if (runtimes == 0) throw new CliException(T("cli.needRuntime"), ExitCodes.Usage);
         if (asUser is not null && !System.Text.RegularExpressions.Regex.IsMatch(asUser, "^[A-Za-z_][A-Za-z0-9_.-]{0,31}$"))
-            throw new CliException($"--as-user \"{asUser}\": nome utente del sistema non valido.", ExitCodes.Usage);
+            throw new CliException(T("daemon.badUser", asUser), ExitCodes.Usage);
         if (asUser is not null && passEnv.Count > 0)
-            throw new CliException("--env non vale con --as-user: il runtime usa l'ambiente e la configurazione del suo utente.", ExitCodes.Usage);
+            throw new CliException(T("daemon.envWithUser"), ExitCodes.Usage);
         if (passEnv.FirstOrDefault(n => n.StartsWith("AGENTWEB_", StringComparison.OrdinalIgnoreCase)) is { } bad)
-            throw new CliException($"{bad}: le variabili AGENTWEB_* non vengono mai passate ai runtime.", ExitCodes.Usage);
+            throw new CliException(T("daemon.noAgentwebVars", bad), ExitCodes.Usage);
     }
 
     static async Task<int> RunWorkersAsync(ApiClient api, CliEnvironment env, Dictionary<string, Runtime> byName, ConcurrentDictionary<string, DaemonResult> done,
@@ -67,7 +68,7 @@ public static class Daemon
                 // Anche il timeout di HttpClient (TaskCanceledException senza stop): è rete lenta, non uno spegnimento.
                 catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException && !stop.IsCancellationRequested)
                 {
-                    env.Err.WriteLine($"daemon: server non raggiungibile ({ex.Message}), riprovo tra 5 s");
+                    env.Err.WriteLine(T("daemon.unreachable", ex.Message));
                     await Task.Delay(TimeSpan.FromSeconds(5), stop.Token);
                     continue;
                 }
@@ -75,7 +76,7 @@ public static class Daemon
                 if (r.StatusCode == HttpStatusCode.NoContent) continue;
                 if (!r.IsSuccessStatusCode)
                 {
-                    env.Err.WriteLine($"daemon: il server risponde HTTP {(int)r.StatusCode}, riprovo tra 5 s");
+                    env.Err.WriteLine(T("daemon.httpError", (int)r.StatusCode));
                     await Task.Delay(TimeSpan.FromSeconds(5), stop.Token);
                     continue;
                 }
@@ -84,12 +85,12 @@ public static class Daemon
                 if (!done.TryGetValue(d.Id, out var result))
                 {
                     result = byName.TryGetValue(d.Runtime, out var rt) ? await ExecuteAsync(api, env, rt, d, passEnv, asUser, stop.Token)
-                        : new(null, $"runtime \"{d.Runtime}\" non offerto da questo daemon");
+                        : new(null, T("daemon.runtimeMissing", d.Runtime));
                     done[d.Id] = result;
                     if (done.Count > 1000) done.Clear(); // basta ricordare le ultime
                 }
                 (await api.SendRawAsync(HttpMethod.Post, $"api/daemon/deliveries/{d.Id}/complete", result, stop.Token)).Dispose(); // 404: già scaduta, il server l'ha riassegnata
-                env.Err.WriteLine($"daemon: ← {d.Id[..8]} {(result.Error is null ? "ok" : "errore: " + result.Error)}");
+                env.Err.WriteLine($"daemon: ← {d.Id[..8]} {(result.Error is null ? "ok" : T("daemon.error", result.Error))}");
             }
         }
 
@@ -149,7 +150,7 @@ public static class Daemon
         using var run = CancellationTokenSource.CreateLinkedTokenSource(stop);
         using var process = new Process { StartInfo = StartInfo(rt, passEnv, asUser) };
         try { process.Start(); }
-        catch (Exception ex) { return new(null, $"impossibile avviare {rt.File}: {ex.Message}"); }
+        catch (Exception ex) { return new(null, T("daemon.cannotStart", rt.File, ex.Message)); }
         // Fuori dal callback: Cancel() esegue le registrazioni in fila, e il kill via sudo può attendere fino a 5 s per processo.
         using var kill = run.Token.Register(() => _ = Task.Run(() => Kill(process, asUser)));
 
@@ -181,14 +182,14 @@ public static class Daemon
             await exited;
             if (heartbeat.IsFaulted) await heartbeat; // rilancia la revoca (CliException, codice 3)
             stop.ThrowIfCancellationRequested();
-            return new(null, "consegna annullata dal server");
+            return new(null, T("daemon.cancelled"));
         }
         run.Cancel();
         try { await heartbeat; } catch (OperationCanceledException) { }
         stop.ThrowIfCancellationRequested();
         var (output, error) = (await stdout, await stderr);
         return process.ExitCode == 0 ? new(output.Trim(), null)
-            : new(null, $"{rt.Name} è uscito con codice {process.ExitCode}: {Tail(error)}");
+            : new(null, T("daemon.exited", rt.Name, process.ExitCode, Tail(error)));
     }
 
     static async Task<string> ReadCappedAsync(StreamReader reader)
@@ -240,6 +241,6 @@ public static class Daemon
                 WantedBy=default.target
                 """, "systemctl --user daemon-reload && systemctl --user enable --now agentweb-daemon");
         }
-        throw new CliException("Installazione come servizio supportata su macOS (launchd) e Linux (systemd).", ExitCodes.Usage);
+        throw new CliException(T("daemon.serviceUnsupported"), ExitCodes.Usage);
     }
 }
