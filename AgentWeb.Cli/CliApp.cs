@@ -46,14 +46,45 @@ public static class CliApp
 
         Altro
           agent list
-          user create <email> [--password-stdin]                   solo amministratori
+          user create <email> [--password-stdin]                   solo amministratori (massimo 5 account per installazione)
+          manual                                                   chi può fare cosa (permessi di persone e agenti)
 
         Opzioni globali: --json (output JSON stabile per script e agenti), --help
         Codici di uscita: 0 ok, 1 errore, 2 uso sbagliato, 3 non autenticato
         Ambiente: AGENTWEB_SERVER (server di default), AGENTWEB_CONFIG_DIR (dove salvare le credenziali)
         """;
 
-    static readonly HashSet<string> Flags = ["--json", "--private", "--password-stdin", "--help", "-h"];
+    // Riassunto leggibile delle regole: quella eseguibile è Phase3AuthorizationTests.Matrix. Cambiando una regola, aggiornare entrambe.
+    const string Manual = """
+        Permessi in AgentWeb
+
+        Account
+          Niente registrazione libera: il primo account (amministratore) si crea dalla pagina di login,
+          gli altri li crea un amministratore (user create). Massimo 5 account di persone per installazione.
+          Gli accessi esterni (Google ecc.) entrano solo in account già esistenti e collegati.
+
+        Sessioni
+          Ogni login, token API e daemon è una sessione. Revocata (sessions revoke, logout, cambio password,
+          admin) non autentica più nulla dalla richiesta successiva, e le connessioni in tempo reale si chiudono.
+
+                                         Admin   Membro   Agente
+          canale pubblico: leggere/scrivere  sì      sì       sì, se aggiunto al canale
+          canale privato: leggere/scrivere   solo se membro (l'admin non ha accesso laterale)
+          creare canali                      sì      sì       no
+          aggiungere membri a un privato     se membro         no
+          togliere membri                    chi ha creato il canale (ognuno può uscire da solo)
+          scegliere gli agenti del canale    chi ha creato il canale
+          task: creare / Fatto / Riapri      chi vede il canale; gli agenti gestiscono da soli In corso e Fatto
+          memoria del canale: cancellare     chi ha creato l'elemento o il canale
+          impostazioni (agenti, LLM)         sì      no       no
+          creare account, revocare sessioni altrui  sì   no   no
+
+        Un canale che non vedi risponde 404, come se non esistesse.
+        Agenti sul daemon: il processo non riceve token né variabili AGENTWEB_*; prompt su stdin, risposta su stdout.
+        Token API (MCP, A2A): stessi permessi dell'utente che li ha creati.
+        """;
+
+    static readonly HashSet<string> Flags =["--json", "--private", "--password-stdin", "--help", "-h"];
 
     sealed record Args(List<string> Positional, Dictionary<string, string> Options, HashSet<string> Switches, Dictionary<string, List<string>> All)
     {
@@ -80,6 +111,7 @@ public static class CliApp
             {
                 case "login": return await LoginAsync(a, env, store);
                 case "logout": return await LogoutAsync(env, store);
+                case "manual": env.Out.WriteLine(Manual); return ExitCodes.Ok;
                 case "daemon" when a.Positional.ElementAtOrDefault(1) is "install" or "uninstall": return Service(a, env);
             }
             if (command == "daemon") Daemon.CheckOptions(a.Many("--runtime").Count, DaemonEnv(a), a.Opt("--as-user"));

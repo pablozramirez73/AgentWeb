@@ -117,6 +117,18 @@ public sealed class Phase2SessionTests
     }
 
     [Fact]
+    public async Task SixthAccount_IsRefused()
+    {
+        using var app = new TestApp();
+        await app.CreateUserAsync("capo@test.it", admin: true);
+        for (var i = 1; i < AccountEndpoints.MaxHumanUsers; i++) await app.CreateUserAsync($"u{i}@test.it");
+        using var admin = await app.LoginAsync("capo@test.it");
+
+        var r = await admin.PostAsJsonAsync("/api/admin/users", new { email = "sesto@test.it", password = TestApp.Password });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
     public async Task AdminRevokesAllSessionsOfAUser()
     {
         using var app = new TestApp();

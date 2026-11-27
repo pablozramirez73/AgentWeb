@@ -14,6 +14,7 @@ namespace AgentWeb.Web;
 public static class AccountEndpoints
 {
     public const string AdminRole = "Admin";
+    public const int MaxHumanUsers = 5; // per installazione; gli agenti non sono account
 
     public sealed record Credentials(string Email, string Password);
 
@@ -92,6 +93,8 @@ public static class AccountEndpoints
     {
         email = email?.Trim() ?? "";
         if (!new EmailAddressAttribute().IsValid(email)) return (null, "Email non valida.");
+        // shortcut: conta e crea non sono atomici, due creazioni nello stesso istante possono arrivare a MaxHumanUsers + 1.
+        if (await users.Users.CountAsync() >= MaxHumanUsers) return (null, $"Limite di {MaxHumanUsers} account raggiunto.");
         var user = new AppUser { UserName = email, Email = email };
         var r = await users.CreateAsync(user, password ?? "");
         if (!r.Succeeded) return (null, string.Join(" ", r.Errors.Select(e => e.Description)));
